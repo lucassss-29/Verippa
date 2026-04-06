@@ -1,6 +1,6 @@
 import subprocess
 import os
-from agent_config import openlane_dir, model, design_name, ol_designname_folder, design_path
+from agent_config import openlane_dir, model, design_name, ol_designname_folder, design_path, ol_source_mount, ol_target_mount
 import shutil
 
 def run_openlane_flow():
@@ -60,7 +60,15 @@ def run_openlane_flow():
         print(f"Failed to run OpenLane flow: {e}")
         return False, None
     
+def symlink_folder():
 
+    if not os.path.islink(ol_target_mount):
+        try:
+            os.symlink(ol_source_mount, ol_target_mount)
+            print(f"Created symlink from {ol_source_mount} to {ol_target_mount}")
+
+        except Exception as e:
+            print(f"Error creating symlink: {e}")
 
 
 run_openlane_flow()
