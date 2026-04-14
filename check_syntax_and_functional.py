@@ -4,7 +4,7 @@ import time
 import logging
 from auto_code_generation import llm_generation
 from kill_process import kill_process_by_name
-from agent_config import design_path, tb_path, design_name
+from agent_config import design_path, tb_path, design_name, prj_dir
 
 std_cmd = "iverilog -Wall -Winfloop -Wno-timescale -g2012 -gsupported-assertions"
 
@@ -25,6 +25,12 @@ def check_syntax_only():
         return False, err_msg
     else:
         # -t null tells iverilog to check syntax without generating output code
+
+        arti_path = os.path.join(prj_dir, "compilation_out")
+
+        if not os.path.exists(arti_path):
+            os.mkdir(arti_path)
+
         cmd = f"{std_cmd} -o ./compilation_out/temp {design_path}"
 
         try:
@@ -34,8 +40,8 @@ def check_syntax_only():
                 return True, None
             else:
                 logging.error(result.stderr)
-                err_msg = result.stderr
-                return False, result.stderr
+                err_msg = str(result.stderr)
+                return False, err_msg
             
         except Exception as e:
             print(f"Command failed with return code {e}")
@@ -46,7 +52,12 @@ def run_testbench():
     Compiles and runs a Verilog testbench using iverilog and vvp.
     Returns the simulation output and error messages.
     """
-    output_vvp_path = os.path.join("./simulation_out", f"{design_name}_test.vvp")
+    sim_arti = os.path.join(prj_dir, "simulation_out")
+
+    if not os.path.exists(sim_arti):
+        os.mkdir(sim_arti)
+
+    output_vvp_path = os.path.join(sim_arti, f"{design_name}_test.vvp")
 
     # Compilation command
     compl_cmd = f"{std_cmd} -o {output_vvp_path} {design_path} {tb_path}"
@@ -65,7 +76,7 @@ def run_testbench():
             error_match = True
 
         if process.returncode != 0 or error_match:
-            error_msg = f"Simulation failed: {stdout}\n{stderr}\nReproducing command: {run_cmd}"
+            error_msg = f"Simulation failed: {stdout}\n{stderr}"
             logging.error(error_msg)
             return False, error_msg
         else:
@@ -97,25 +108,4 @@ def run_testbench():
         logging.error(error_msg)
         return False, error_msg
 
-if __name__ == "__main__":
-
-    design_name = 'accu'
-
-    model = "deepseek-rs-v3.2"
-
-    file_path = './Deepseek_model/accu/accu.v'
-    tb_file_path = "./Deepseek_model/accu/accu_tb.v"
-
-    result, err_reason = check_syntax_only(file_path)
-
-    if result:
-        print("The design is syntaxcally correct.")
-        tb_result, err_ms = run_testbench(file_path, tb_file_path, "id_01")
-        if tb_result:
-            print("The design is simulated with no errors.")
-        else:
-            logging.info("Simulation failed with error")
-            # simulation_correct(err_ms, tb_file_path, file_path)
-    else:
-        logging.info("Syntax checking failed.")
-        # compilation_correct(err_reason, file_path)
+# run_testbench()

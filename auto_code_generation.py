@@ -6,9 +6,9 @@ from openai import OpenAI
 
 import os
 from dotenv import load_dotenv
-from project_prompt import get_performance_prompt, get_sys_testbench_prompt, get_testbench_requirements
+from project_prompt import get_performance_prompt, get_sys_testbench_prompt, get_usr_design_requirements
 from text_processing import clean_testbench_file, clean_verilog_file
-from agent_config import design_name, model, design_path, tb_path
+from agent_config import design_name, model, design_path, tb_path, design_folder_path, save_failure_int_log
 
 load_dotenv()  # takes environment variables from .env.
 
@@ -73,10 +73,15 @@ def llm_generation(is_design: str, msg, attempt: int, phase: str):
 def read_description(benchmark_design_path):
     try:
         with open(benchmark_design_path, 'r') as description_file:
+
             lines = description_file.readlines() 
+
             description = lines[2:]
+            
             return str(description)
+        
     except FileNotFoundError:
+
         print("File not found for folder")
 
 def testbench_generation(msg):
@@ -93,39 +98,55 @@ def testbench_generation(msg):
     return result
 
 def compilation_correct(msg, err, file_path, attempt):
+
+    phase = "phase_1"
+
     try:
         with open(file_path, 'r') as f:
             content = f.read()
+
     except Exception as e:
-        print(f"Error message during correct simulation: {e}")
-        
-    correct_sys = "Please act as an expert in synthesis design."
+        print(f"Exception during correct compilation: {e}")
 
-    correct_pt = err + "\nBased on the error(s) shown above" + "Here is the Verilog design: \n" + content + "\nProvide only one solution to fix the issue directly without any explanation, just provide the solution. Your answer will be input for an another process, so please package it into a code block file, start file with \'module\'."
+    fail_log = f"{phase} attempt {attempt}:\n{err}"
 
-    msg.append({"role": "system", "content": correct_sys})
+    save_failure_int_log(fail_log)
+
+    # correct_sys = "Please act as an expert in synthesis design and correct the RTL design. Only provide raw code"
+
+    correct_pt = "The design encountered with a syntax error. Here is the fault:\n" +  err + "\nBased on this, please investigate root cause and provide a solution to fix it." + get_usr_design_requirements()
+
+    # msg.append({"role": "system", "content": correct_sys})
     msg.append({"role": "user", "content": correct_pt})
 
-
-    result = llm_generation("design", msg, attempt, "phase_1")
+    result = llm_generation("design", msg, attempt, phase)
 
     return result
 
 def simulation_correct(msg, err, attempt):
+
+    phase = "phase_2"
+
     try:
         with open(tb_path, 'r') as f:
             tb_content = f.read()
         with open(design_path, 'r') as f:
             ds_content = f.read()
     except Exception as e:
-        print(f"Error message during correct simulation: {e}")
+        print(f"Exception during correct simulation: {e}")
+
+    fail_log = f"{phase} attempt {attempt}:\n{err}"
+
+    save_failure_int_log(fail_log)
 
     # Update new solution
-    system_role = "Please act as expert in Digital Verification Engineer. Your task is to generate testbench only based on error and reference RTL design. Please investigate the root cause and provide a solution to fix the issue. Your task is to only correct the testbench code, do not change the RTL design. The testbench name should be: " + design_name + "_tb.v. While generating the testbench, please comply with the following requirements:" + get_testbench_requirements()
+    # system_role = "Please act as expert in Digital Verification Engineer. Your task is only to generate raw systemVerilog code base on errors. Please investigate the root cause and provide a solution to fix the issue. Please comply with the following requirements:" + get_sys_design_requirements()
 
-    correct_pt = "\nHere is the error description:\n" + err + "\nPrevious testbench content:\n" + tb_content + "\n Here is the reference RTL design content:\n" + ds_content
-    msg.append({"role": "system", "content": system_role})
+    correct_pt = "\nThe design encountered error during simulation with testbench with error:\n" + err + "\Here is a corresponding testbench:\n" + tb_content + "\n Here is a RTL design:\n" + ds_content + "\n Based on the errors, please provide with new RTL design code." + get_usr_design_requirements()
+
+    # msg.append({"role": "system", "content": system_role})
+
     msg.append({"role": "user", "content": correct_pt})
 
-    llm_generation("testbench", msg, attempt, "phase_2")
+    llm_generation("design", msg, attempt, phase)
 
