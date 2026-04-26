@@ -1,16 +1,18 @@
+from webbrowser import get
 from agent_config import design_name
 
 def get_performance_prompt(version: int):
 
-    system_0 = "You are an expert in RTL code generation. You goal is to generate raw systemVerilog design code with requirements. The target design name is: " + design_name 
+    system_0 = "You are an expert in RTL code generation. You goal is to generate raw systemVerilog design code with requirements. The design then goes through syntax checking, run simulation with testbench, and finally run by OpenLane flow to generate metrics report including area, critical path and power usage. The target design name is: " + design_name + get_sys_design_requirements()
 
+    # Performance-aware
     system_1 = "You are an RTL design assistant. Generate synthesizable SystemVerilog with awareness of timing and basic performance considerations. Keep logic simple, avoid long combinational paths. The target design name is: " + design_name + "\nPerformance requirements:\
     \n- Avoid chaining multiple arithmetic operations in a single cycle \
     \n- Keep combinational logic shallow\
     \n- RTL module with basic performance-aware structure\
-    \n- Use simple staging if logic appears long" + get_sys_design_requirements() + "\
+    \n- Use simple staging if logic appears long\
     \nConstraints:\
-    \n- No inferred latches \n Following is the design description: \n"
+    \n- No inferred latches\n" + get_sys_design_requirements()
 
     system_2 = "You are an expert RTL designer focused on timing-aware and structured high-quality SystemVerilog. Optimize for clock frequency by controlling combinational depth, structuring datapath vs control, and introducing pipelining where appropriate. \
     \nPerformance requirements:\
@@ -19,7 +21,7 @@ def get_performance_prompt(version: int):
     \n- Separate datapath and control logic\
     \n- Avoid large mux trees and deep conditionals on critical paths\
     \n- Use parallelism where beneficial\
-    \n- Control bit-width growth explicitly" + get_sys_design_requirements() + "\n Following is the design description: \n"
+    \n- Control bit-width growth explicitly" + get_sys_design_requirements()
 
     system_3="You are a Lead Hardware Architect specializing in high-frequency ASIC design. Your goal is to write Verilog code to achieve the lowest possible critical path delay. The design will start with \'module\' and finish with \'endmodule\'. \nThe target design name: " + design_name + "\
     \nPerformance requirements: \
@@ -27,11 +29,11 @@ def get_performance_prompt(version: int):
     \n- Technology: Sky30 \
     \n- Aggressive pipelining: break down complex combinational logic into multiple stages. Insert pipeline registers at every natural logic boundary to ensure no stage exceeds 10 gate levels. \
     \n- Registered boundaries: All inputs and outputs must be registered. No purely combinational paths are allowed from input to output. \
-    \n- Parallelism over reuse: Favor \"unrolled\" architectures. If there is a loop or a repeated operation, implement it in parallel rather than reusing a single resource over multiple clock cycles." + get_sys_design_requirements() + "\
+    \n- Parallelism over reuse: Favor \"unrolled\" architectures. If there is a loop or a repeated operation, implement it in parallel rather than reusing a single resource over multiple clock cycles. \
     \nSpecific quantitative constraints: \
     \n- Max logic depth: 12-15 gates between registers. \
     \n- Max fanout: 8 \
-    \n WNS target: 0.0 ns \n Following is the design description: \n"
+    \n WNS target: 0.0 ns \n" + get_sys_design_requirements()
 
     system_prompt = [system_0, system_1, system_2, system_3]
 
