@@ -1,27 +1,31 @@
+from operator import le
 import os
-from auto_code_generation import read_description, simulation_correct, llm_generation, compilation_correct
-from project_prompt import get_performance_prompt
-from check_syntax_and_functional import check_syntax_only, run_testbench
 
-from agent_config import show_log, out_conversation_path, save_log, agent_gen_timestamp, openlane_dir, State, prompt_version
+from auto_code_generation import read_description, simulation_correct, llm_generation, compilation_correct
+from project_prompt import get_performance_prompt, get_area_prompt
+from check_syntax_and_functional import check_syntax_only, run_testbench
+from agent_config import show_log, save_log, agent_gen_timestamp, fetch_workflow_variables, reset_log, State, prompt_version, max_attempts, design_list, openlane_dir
+import agent_config as ac
 import time
-from extract_PPA_csv import extract_ppa_to_excel
-from agent_config import max_attempts, design_name, benchmark_design_path, design_path
+from extract_PPA_csv import extract_ppa_to_excel, extract_failure_data
 from openlane_flow import openlane_flow_run, openlane_correct
 import globals
+from run_benchmark import copy_benchmark_design
+import run_benchmark
 
 
 class FlowManager:
     def __init__(self):
-        self.design_name = design_name
+        self.design_name = globals.design_name
         self.current_state = globals.agent_step
         self.previous_state = State.INITIAL
-        self.retry_count = 0
+        self.synt_count = 0
+        self.sim_count = 0
+        self.ol_entry = 0
         self.loop_count = 0
         self.max_retries = max_attempts
         self.error_reason = None
         self.msg = []
-        self.ol_entry = 0
 
 
     def transition_to(self, next_state):
@@ -43,8 +47,6 @@ class FlowManager:
     def run(self):
         while True:
 
-            print(f"\n[STATUS] Current State: {self.current_state.name}")
-            
             if self.current_state == State.INITIAL:
                 self.handle_initial()
 
@@ -69,9 +71,6 @@ class FlowManager:
             elif self.current_state == State.DONE:
                 self.handle_done()
                 break
-            elif self.current_state == State.ERROR:
-                self.handle_error()
-                break
             
             time.sleep(1) # Small delay for readability
 
@@ -82,6 +81,8 @@ class FlowManager:
         print("-> Starting the workflow...\n")
 
         self.transition_to(State.GENERATE_DESIGN)
+
+        globals.start_time = time.time()
 
 
 
@@ -94,13 +95,19 @@ class FlowManager:
         if self.previous_state == State.INITIAL:
 
             # Append system prompt with first attempt
+
+            if ac.PPA_type == 'Performance':
             
-            system_pt = get_performance_prompt(prompt_version)
+                system_pt = get_performance_prompt(prompt_version)
+            
+            elif ac.PPA_type == 'Area':
+
+                system_pt = get_area_prompt(prompt_version)
 
             # Description will be the user prompt
-            self.msg.append({"role": "system", "content": system_pt})
+            self.msg.append({"role": "developer", "content": system_pt})
 
-            user_pt = read_description(benchmark_design_path)
+            user_pt = read_description(ac.benchmark_design_path)
 
             self.msg.append({"role": "user", "content": user_pt})
 
@@ -119,8 +126,16 @@ class FlowManager:
 
 
     def handle_verify_syntax(self):
+        
+        ############## Only applied when running benchmark
+        copy_benchmark_design()
 
-        verify_log = f"-> Running iverilog syntax check...\nAttempt {self.retry_count} of {self.max_retries} for design: {self.design_name}\n"
+        globals.start_time = time.time()
+        ############## Only applied when running benchmark
+
+        self.synt_count += 1
+
+        verify_log = f"[SYNTX] Running iverilog syntax check...\n[SYNTX]Attempt {self.synt_count} of {self.max_retries} for design: {self.design_name}\n"
 
         show_log(verify_log)
 
@@ -128,106 +143,107 @@ class FlowManager:
 
         if result:
 
-            show_log("\nThe design is syntaxcally correct.\n")
+            show_log("\n[SYNTX] The design is syntaxcally correct.\n")
             
-            show_log(f"\nNo of attempts successful syntax: {self.retry_count + 1}\n")
+            show_log(f"[SYNTX] No of attempts successful syntax: {self.synt_count}\n")
 
-            # Recore successful syntax attempt
-            globals.record_syntax_attempt = self.retry_count + 1
-
-            self.retry_count = 0 # Reset retry count for the next phase
+            # Record successful syntax attempt
+            globals.record_syntax_attempt = self.synt_count
             
             self.transition_to(State.RUN_SIMULATION)
 
         else:
             self.error_reason = verify_err
 
-            self.correct_design_int()
+            self.correct_design_syntax()
 
 
 
     def handle_run_simulation(self):
 
-        show_log("\n-> Running simulation with testbench\n")
+        self.sim_count += 1
+
+        show_log("\n[SIM] Running simulation with testbench\n")
 
         result, sim_err = run_testbench()
 
         if result:
 
-            show_log("\nThe design is simulated with no errors.\n")
-
-            show_log(f"\nNo of attempts successful simulation: {self.retry_count + 1}\n")
+            show_log(f"[SIM] No of attempts successful simulation: {self.sim_count}\n")
 
             # Record successful simulation attempt
-            globals.record_simulation_attempt = self.retry_count + 1
+            globals.record_simulation_attempt = self.sim_count
 
             self.transition_to(State.RUN_OPENLANE)
 
         else:
             self.error_reason = sim_err
 
-            self.correct_testbench_int()
+            self.correct_design_simulation()
 
 
+    def correct_design_syntax(self):
 
-    def correct_design_int(self):
+        if self.synt_count <= self.max_retries:
 
-        self.retry_count += 1
+            print(f"[SYNTX] Attempting design syntax correction {self.synt_count}/{self.max_retries}...\n")
 
-        if self.retry_count <= self.max_retries:
-
-            print(f"-> Attempting design correction {self.retry_count}/{self.max_retries}...\n")
-
-            compilation_correct(self.msg, self.error_reason, design_path, self.retry_count)
+            compilation_correct(self.msg, self.error_reason, ac.design_path, self.synt_count)
 
             self.transition_to(State.VERIFY_SYNTAX)
             
         else:
 
-            print("Error state: Correct design with max retries reached.\n")
+            print("Error state: Correct syntax with max retries reached.\n")
 
-            self.transition_to(State.ERROR)
+            self.error_reason = "Correct syntax with max retries"
+
+            globals.record_syntax_attempt = self.synt_count
+
+            self.transition_to(State.WRITE_CSV)
 
 
         
-    def correct_testbench_int(self):
+    def correct_design_simulation(self):
 
-        # Start entry with 1, end with max (e.g., 5)
-        offset_entry = 0
-
-        self.retry_count += 1
-
-        if self.retry_count <= self.max_retries:
+        if self.sim_count <= self.max_retries:
             
-            print(f"-> Attempting testbench correction {self.retry_count}/{self.max_retries}...\n")
+            print(f"[SIM] Attempting design simulation correction {self.sim_count}/{self.max_retries}...\n")
 
-            simulation_correct(self.msg, self.error_reason, (self.retry_count + offset_entry))
+            simulation_correct(self.msg, self.error_reason, self.sim_count)
 
             self.transition_to(State.RUN_SIMULATION)
         else:
-            print("Error state: Correct testbench with max retries reached.\n")
+            print("Error state: Correct simulation with max retries reached.\n")
 
-            self.transition_to(State.ERROR)
+            self.error_reason = "Correct simulation with max retries"
+
+            globals.record_simulation_attempt = self.sim_count
+
+            self.transition_to(State.WRITE_CSV)
 
 
 
     def handle_run_openlane(self):
+        
+        self.ol_entry += 1
 
-        show_log("\n-> Running OpenLane flow...\n")
+        show_log("\n[OL] Running OpenLane flow...")
 
         # Newly created the tag
         tag = agent_gen_timestamp()
+
+        # Debug
+        # globals.olis_init = False
 
         # log_info and log_dir in case failure
         result = openlane_flow_run(globals.olis_init, tag)
 
         if result:
 
-            show_log(f"\nNo of attempts successful OpenLane: {self.ol_entry + 1}\n")
+            show_log(f"[OL] No of attempts successful OpenLane: {self.ol_entry}\n")
 
             globals.timestamp_tag = tag
-
-            globals.record_openlane_attempt = self.ol_entry + 1
 
             self.transition_to(State.WRITE_CSV)
 
@@ -235,14 +251,14 @@ class FlowManager:
 
             self.transition_to(State.CORRECT_OPENLANE)
 
+        globals.record_openlane_attempt = self.ol_entry
+
 
     def handle_correct_openlane(self):
 
-        self.ol_entry += 1
-
         if self.ol_entry <= self.max_retries:
 
-            print(f"-> Attempting Openlane correction {self.ol_entry}/{self.max_retries}...\n")
+            print(f"\n[OL] Attempting Openlane correction {self.ol_entry}/{self.max_retries}...\n")
 
             openlane_correct(self.msg, self.ol_entry)
 
@@ -254,61 +270,77 @@ class FlowManager:
 
         else:
 
-            print("Error state: Correct Openlane with max retries reached.\n")
+            show_log("Error state: Correct Openlane with max retries reached.\n")
 
-            self.transition_to(State.ERROR)
+            self.error_reason = "Correct Openlane with max retries"
+
+            self.transition_to(State.WRITE_CSV)
 
 
     def handle_write_csv(self):
 
-        # Get the csv path base on timestamp tag
-        path_csv = os.path.join(openlane_dir, "designs", design_name, "runs", globals.timestamp_tag, "reports", "metrics.csv")
+        if globals.start_time is not None:
+        
+            globals.end_time = time.time()
 
-        result = extract_ppa_to_excel(path_csv, globals.record_syntax_attempt, globals.record_simulation_attempt, globals.record_openlane_attempt)
+            globals.duration_minutes = round((globals.end_time - globals.start_time) / 60, 2)
+        
+        else:
+            globals.duration_minutes = 255
 
-        if result:
+        # Only success in OpenLane flow
+        if globals.timestamp_tag:
 
-            self.transition_to(State.DONE)
+            path_csv = os.path.join(openlane_dir, "designs", self.design_name, "runs", globals.timestamp_tag, "reports", "metrics.csv")
+
+            extract_ppa_to_excel(path_csv, globals.record_syntax_attempt, globals.record_simulation_attempt, globals.record_openlane_attempt, globals.duration_minutes)
 
         else:
 
-            self.transition_to(State.ERROR)
+            extract_failure_data(self.error_reason, globals.record_syntax_attempt, globals.record_simulation_attempt, globals.record_openlane_attempt, globals.duration_minutes, ac.prompt_version)
+
+        self.transition_to(State.DONE)
 
 
     def handle_done(self):
 
-        show_log("\n-> Workflow completed successfully!\n")
-
         # Additional success handling can be added here
-        with open(out_conversation_path, 'w') as f:
+        with open(ac.out_conversation_path, 'w') as f:
 
             for message in self.msg:
 
                 f.write(f"{message}\n")
 
-
-    def handle_error(self):
+        show_log("\n[DONE] Workflow completed!\n")
         
-        print("-> Workflow terminated with errors.\n")
+        # Save data in 'flow.log'
+        save_log()
 
-        # Write the conversation
-        with open(out_conversation_path, 'w') as f:
+        reset_log()
 
-            for message in self.msg:
+        # Reset tag
+        globals.timestamp_tag = ""
 
-                f.write(f"{message}\n")
+        # Reset config.json
+        globals.olis_init = True
+
+        globals.running_total_tokens = 0
 
 
 if __name__ == "__main__":
 
-    # Start the workflow
-    if __name__ == "__main__":
+    for i in range(10, 20):
 
+        globals.design_name = design_list[i]
+
+        print("\nProcessing design number: ", i)
+
+        fetch_workflow_variables()
+        
         flow = FlowManager()
 
         flow.run()
 
-        save_log()
 
 
 

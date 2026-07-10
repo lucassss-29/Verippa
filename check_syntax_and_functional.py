@@ -2,9 +2,9 @@ import os
 import subprocess
 import time
 import logging
-from types import NoneType
 from kill_process import kill_process_by_name
-from agent_config import design_path, tb_path, design_name, prj_dir
+import agent_config
+import globals
 
 std_cmd = "iverilog -Wall -Winfloop -Wno-timescale -g2012 -gsupported-assertions"
 
@@ -23,7 +23,8 @@ def check_syntax_only():
     Checks the syntax of a Verilog file using the Icarus Verilog compiler (iverilog).
     This function only performs a syntax check without generating an executable.
     """
-    if not os.path.exists(design_path):
+
+    if not os.path.exists(agent_config.design_path):
 
         err_msg = "File not found"
 
@@ -32,13 +33,13 @@ def check_syntax_only():
     else:
         # -t null tells iverilog to check syntax without generating output code
 
-        arti_path = os.path.join(prj_dir, "compilation_out")
+        arti_path = os.path.join(agent_config.prj_dir, "compilation_out")
 
         if not os.path.exists(arti_path):
 
             os.mkdir(arti_path)
 
-        cmd = f"{std_cmd} -o ./compilation_out/temp {design_path}"
+        cmd = f"{std_cmd} -o ./compilation_out/temp {agent_config.design_path}"
 
         try:
             result = subprocess.run(cmd, shell=True, capture_output=True, text=True)
@@ -67,16 +68,24 @@ def run_testbench():
     Compiles and runs a Verilog testbench using iverilog and vvp.
     Returns the simulation output and error messages.
     """
-    sim_arti = os.path.join(prj_dir, "simulation_out")
+    sim_arti = os.path.join(agent_config.prj_dir, "simulation_out")
 
     if not os.path.exists(sim_arti):
 
         os.mkdir(sim_arti)
 
-    output_vvp_path = os.path.join(sim_arti, f"{design_name}_test.vvp")
+    output_vvp_path = os.path.join(sim_arti, f"{globals.design_name}_test.vvp")
 
     # Compilation command
-    compl_cmd = f"{std_cmd} -o {output_vvp_path} {design_path} {tb_path}"
+    if agent_config.benchmark == agent_config.BenchmarkType.RTLLM:
+        compl_cmd = f"{std_cmd} -o {output_vvp_path} {agent_config.design_path} {agent_config.tb_path}"
+    
+    elif agent_config.benchmark == agent_config.BenchmarkType.VERILOGEVAL:
+        
+        # Due to the testbench called 2 module to verified, so include additional verified module.
+        verified_design_path = os.path.join(agent_config.prj_dir,agent_config.benchmark_folder, globals.design_name, f"verified_{globals.design_name}.sv")
+
+        compl_cmd = f"{std_cmd} -o {output_vvp_path} {agent_config.design_path} {verified_design_path} {agent_config.tb_path}"
 
     sim_cmd = f"vvp {output_vvp_path}"
 
@@ -92,10 +101,19 @@ def run_testbench():
         #  Wait for the process to complete with a timeout
         stdout, stderr = process.communicate(timeout=20)
 
-        #  TODO: what if the output not contains "Failed" or "Error"
-        if "failed" in stdout.lower() or "failed" in stderr.lower() or "error" in stdout.lower() or "error" in stderr.lower() or "failures" in stdout.lower() or "failures" in stderr.lower():
+        # Check if VerilogEval benchmark is being used
+        if agent_config.benchmark == agent_config.BenchmarkType.VERILOGEVAL:
 
-            error_match = True
+            if "Mismatches: 0" in stdout:
+                pass
+            else:
+                error_match = True
+
+        else:
+
+            if "failed" in stdout.lower() or "failed" in stderr.lower() or "error" in stdout.lower() or "error" in stderr.lower() or "failures" in stdout.lower() or "failures" in stderr.lower():
+
+                error_match = True
 
         if process.returncode != 0 or error_match:
 

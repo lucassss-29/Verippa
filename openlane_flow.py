@@ -1,14 +1,13 @@
+from dis import show_code
 import subprocess
 import os
-import agent_config as config
+import agent_config as ac
 import shutil
 import re
 import json
 from enum import Enum, auto
-
-from auto_code_generation import openlane_generation
-
 import globals
+from auto_code_generation import openlane_generation
 
 ADJUST_CLOCK_PED = 10
 
@@ -20,27 +19,26 @@ class OpenLaneIssue(Enum):
 
 # Run OpenLane and return True: successful, False: failure
 def openlane_flow_run(is_init: bool, run_tag):
-    print("Running OpenLane flow")
 
     # Mount the OpenLane designs folder to current workspace
     openlane_symlink_folder()
 
-    with open(config.log_path, 'a') as file:
-        file.write(f"\nLOG {run_tag}")
+    with open(ac.log_path, 'a') as file:
+        file.write(f"LOG {run_tag}\n")
 
     # Initialize output_log content
     output_log = ""
 
-    ol_designname_folder = os.path.join(config.openlane_dir, config.model, config.design_name)
+    ol_designname_folder = os.path.join(ac.openlane_dir, ac.model, globals.design_name)
 
     if not os.path.exists(ol_designname_folder):
         #  Create folder with name followed by LLM model
         os.makedirs(ol_designname_folder)
 
     try:
-        path = shutil.copy(config.design_path, config.ol_designname_folder)
+        path = shutil.copy(ac.design_path, ac.ol_designname_folder)
         
-        print(f"Copied design files to {path}\n")
+        ac.show_log(f"\n[OL] Copied design files to {path}\n")
 
     except Exception as e:
 
@@ -48,11 +46,11 @@ def openlane_flow_run(is_init: bool, run_tag):
 
         return False
 
-    flow_cmd = f"./flow.tcl -design {config.design_name} -tag {run_tag}"
+    flow_cmd = f"./flow.tcl -design {globals.design_name} -tag {run_tag}"
 
     if is_init:
 
-        init_cmd = f"./flow.tcl -design {config.design_name} -init_design_config -add_to_designs -src {config.ol_designname_folder}"
+        init_cmd = f"./flow.tcl -design {globals.design_name} -init_design_config -add_to_designs -src {ac.ol_designname_folder}"
 
         inner_command = f"{init_cmd}\n{flow_cmd}\nexit\n"
 
@@ -64,7 +62,7 @@ def openlane_flow_run(is_init: bool, run_tag):
         # Execute the container and run the inner command non-interactively
         process = subprocess.Popen(
             ["make", "mount"],
-            cwd=config.openlane_dir,
+            cwd=ac.openlane_dir,
             stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
@@ -87,19 +85,19 @@ def openlane_flow_run(is_init: bool, run_tag):
         # Wait for the process to finish
         return_code = process.wait()
 
-        if not os.path.exists(os.path.dirname(config.ol_raw_log)):
+        if not os.path.exists(os.path.dirname(ac.ol_raw_log)):
 
-            os.mkdir(os.path.dirname(config.ol_raw_log))
+            os.mkdir(os.path.dirname(ac.ol_raw_log))
 
-        with open(config.ol_raw_log, 'w') as log_file:
+        with open(ac.ol_raw_log, 'w') as log_file:
 
-            config.show_log(f"Writing OpenLane flow output_log to {config.ol_raw_log}\n")
+            ac.show_log(f"[OL] Writing OpenLane flow output_log to {ac.ol_raw_log}\n")
 
             log_file.write(output_log)
 
         if return_code == 0:
 
-            config.show_log("\nFlow completed successfully.\n")
+            ac.show_log("\n[OL] OpenLane flow completed.\n")
 
             return True
 
@@ -114,16 +112,16 @@ def openlane_flow_run(is_init: bool, run_tag):
 
             if err_extract:
 
-                with open(config.ol_log_path, 'w') as file:
+                with open(ac.ol_log_path, 'w') as file:
 
                     file.write(err_extract)
 
-                print(f"\nFlow failed with code:\n{err_extract}\n")
+                print(f"Flow failed with code:\n{err_extract}\n")
 
             if path_extr:
 
                 # Write log path to file for further processing
-                with open(config.ol_path_extracted, 'w') as f:
+                with open(ac.ol_path_extracted, 'w') as f:
 
                     f.write(path_extr)
 
@@ -142,7 +140,7 @@ def openlane_parse_error():
 
     path_reason = ""
 
-    with open(config.ol_raw_log, 'r') as log_file:
+    with open(ac.ol_raw_log, 'r') as log_file:
 
         output_text = log_file.read()
 
@@ -161,14 +159,12 @@ def openlane_parse_error():
 
                 err_reason += error + "\n"
 
-            print(f"Found error line: {err_reason}\n")
-
             # Extract paths from the error reason (if any)
             paths_list = openlane_extract_paths(err_reason)
 
             if paths_list:
                 
-                config.show_log(f"Openlane failed extracted number of paths: {len(paths_list)}\n")
+                ac.show_log(f"Openlane failed extracted number of paths: {len(paths_list)}\n")
 
                 for path in paths_list:
 
@@ -195,12 +191,12 @@ def openlane_extract_paths(text):
 
 def openlane_symlink_folder():
 
-    if not os.path.islink(config.ol_target_mount):
+    if not os.path.islink(ac.ol_target_mount):
         
         try:
-            os.symlink(config.ol_source_mount, config.ol_target_mount)
+            os.symlink(ac.ol_source_mount, ac.ol_target_mount)
 
-            print(f"Created symlink from {config.ol_source_mount} to {config.ol_target_mount}\n")
+            print(f"Created symlink from {ac.ol_source_mount} to {ac.ol_target_mount}\n")
 
         except Exception as e:
 
@@ -212,16 +208,16 @@ def openlane_update_json():
 
     ADJUST_CLOCK_PED += 10
 
-    with open(config.ol_json_path, "r") as f:
+    with open(ac.ol_json_path, "r") as f:
         data = json.load(f)
 
     data["CLOCK_PERIOD"] = ADJUST_CLOCK_PED
 
-    with open(config.ol_json_path, "w") as f:
+    with open(ac.ol_json_path, "w") as f:
 
         json.dump(data, f, indent=4)
 
-    config.show_log(f"\nUpdated successfully with CLOCK_PERIOD: {ADJUST_CLOCK_PED}\n")
+    ac.show_log(f"Updated successfully with CLOCK_PERIOD: {ADJUST_CLOCK_PED}\n")
 
 
 # Find in raw log step number of failed setup.
@@ -230,9 +226,9 @@ def openlane_error_find_step():
     # Dummy step number
     step_number = 255
 
-    if os.path.exists(config.ol_path_extracted):
+    if os.path.exists(ac.ol_path_extracted):
 
-        with open(config.ol_path_extracted, 'r') as log_file:
+        with open(ac.ol_path_extracted, 'r') as log_file:
 
             log_data = log_file.read()
 
@@ -246,7 +242,7 @@ def openlane_error_find_step():
     
     else:
 
-        with open(config.ol_log_path, 'r') as log_file:
+        with open(ac.ol_log_path, 'r') as log_file:
 
             log_data = log_file.read()
 
@@ -257,7 +253,7 @@ def openlane_error_find_step():
         if match:
             step_number = match.group(1)
 
-    config.show_log(f"Openlane detected failed step number: {step_number}\n")
+    ac.show_log(f"Openlane failed step: {step_number}\n")
 
     return int(step_number) 
 
@@ -268,7 +264,7 @@ def openlane_error_linter():
 
     log_path = ""
 
-    with open(config.ol_raw_log, 'r') as log_file:
+    with open(ac.ol_raw_log, 'r') as log_file:
 
         log_data = log_file.read()
 
@@ -278,7 +274,7 @@ def openlane_error_linter():
 
         error_count = match.group(1)
 
-        print(f"Found {error_count} errors by linter.")
+        print(f"Found {error_count} errors by linter.\n")
 
         if int(error_count) > 0:
 
@@ -291,9 +287,9 @@ def openlane_error_linter():
                 log_path = log_match.group(1)
 
                 # Convert to absolute path
-                log_path = os.path.join(config.openlane_dir, log_path)
+                log_path = os.path.join(ac.openlane_dir, log_path)
 
-                print(f"Log File Path: {log_path}")
+                print(f"Log File Path: {log_path}\n")
     else:
         print("No errors found by linter.")
 
@@ -302,58 +298,57 @@ def openlane_error_linter():
 def openlane_correct(msg, attempt):
 
     # First mainly log path from error parsing
-    primary_detailed_log_path = config.ol_summary_path
+    primary_detailed_log_path = ac.ol_summary_path
 
     issue = "unknown issue"
 
     found_step = openlane_error_find_step()
 
-    if found_step:
+    match found_step:
 
-        match found_step:
+        case 0:
+            # STEP 0
+            lt_cnt, lt_log = openlane_error_linter()
 
-            case 0:
-                # STEP 0
-                lt_cnt, lt_log = openlane_error_linter()
+            if lt_cnt > 0:
 
-                if lt_cnt > 0:
-
-                    issue = OpenLaneIssue.REGEN_DESIGN
-
-                    primary_detailed_log_path = lt_log
-
-            case 1:
-                # STEP 1
                 issue = OpenLaneIssue.REGEN_DESIGN
 
-            case 31:
-                # STEP 31
-                issue = OpenLaneIssue.CLOCK_PED
+                primary_detailed_log_path = lt_log
 
-            case _:
-                # STEP 6
-                issue = OpenLaneIssue.PDN_0175_SMALL
+        case 1:
+            # STEP 1
+            issue = OpenLaneIssue.REGEN_DESIGN
+            pass
+
+        case 31:
+            # STEP 31
+            issue = OpenLaneIssue.CLOCK_PED
+
+        case _:
+            # STEP 6
+            issue = OpenLaneIssue.PDN_0175_SMALL
         
     phase = "phase_3"
 
     # Save in file error.log 
-    config.save_failure_int_log(f"{phase} attempt {attempt}: {issue}")
+    ac.save_failure_int_log(f"{phase} attempt {attempt}: {issue}")
 
     match issue:
 
         case OpenLaneIssue.PDN_0175_SMALL:
 
-            # Manually update json config
-            with open(config.ol_json_path, "r") as f:
+            # Manually update json ac
+            with open(ac.ol_json_path, "r") as f:
                 data = json.load(f)
 
             data["FP_CORE_UTIL"] = 0.4
 
-            with open(config.ol_json_path, "w") as f:
+            with open(ac.ol_json_path, "w") as f:
 
                 json.dump(data, f, indent=4)
 
-            print(f"Updated successfully with FP_CORE_UTIL: {data['FP_CORE_UTIL']}\n")
+            ac.show_log(f"Updated successfully with FP_CORE_UTIL: {data['FP_CORE_UTIL']}\n")
 
             # No need init Openlane container again
             globals.olis_init = False

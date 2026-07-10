@@ -1,0 +1,177 @@
+import linecache
+import os
+import shutil
+import re
+
+VE_path = "/Users/dsmac/Documents/thesis/impl/Verippa/Dataset/verilog-eval/dataset_spec-to-rtl/"
+
+cust_path = os.path.join(VE_path, 'customize')
+
+
+ds_name_only = ""
+
+
+def process_rename_RefModule(file_path, new_name):
+    with open(file_path, 'r', encoding='utf-8') as f:
+        content = f.read()
+    
+    pattern = r'(\bmodule\s+)RefModule\b'
+    
+    # Replace with 'module YourNewName'
+    updated_content = re.sub(pattern, rf'\1{new_name}', content)
+    
+    with open(file_path, 'w', encoding='utf-8') as f:
+        f.write(updated_content)
+    print(f"Successfully updated module name in {file_path}")
+
+
+def process_filter_name(name):
+
+    filtered_name = name.split('_', 1)[1]
+    return filtered_name
+
+def process_copy(src_file, tar_file):
+
+    if not os.path.exists(tar_file):
+
+        shutil.copy(src_file, tar_file)
+    
+    else:
+        print('File already existed.')
+
+
+def process_create_folder(ds_name):
+
+    folder_path = os.path.join(VE_path,'customize', ds_name)
+
+    if not os.path.exists(folder_path):
+        os.makedirs(folder_path, exist_ok=True)
+
+
+    
+def process_fix_tb_declare(file_path):
+
+        # 1. Read the file content
+    with open(file_path, "r") as file:
+        content = file.read()
+
+    # 2. Extract the wire declarations block
+    # This pattern matches both wire lines and any trailing whitespace/newlines
+    wire_pattern = r"(\s*wire\s+tb_match;.*?\n\s*wire\s+tb_mismatch\s*=\s*~tb_match;)"
+    wire_match = re.search(wire_pattern, content)
+
+    if wire_match:
+        wire_block = wire_match.group(1)
+        
+        # Remove the wires from their original location
+        content_modified = content.replace(wire_block, "")
+        
+        # 3. Locate the 'initial begin' block for the dump file
+        # We look for 'initial begin' followed by '$dumpfile'
+        target_pattern = r"(\s+initial\s+begin\s*\n\s*\$dumpfile)"
+        
+        if re.search(target_pattern, content_modified):
+            # Insert the wire block right before 'initial begin'
+            content_modified = re.sub(
+                target_pattern, 
+                lambda match: wire_block + match.group(1), 
+                content_modified
+            )
+            
+            # 4. Save the modified content back to the file
+            with open(file_path, "w") as file:
+                file.write(content_modified)
+                
+            print("Success: Moved wire declarations before the initial dumpvars block.")
+        else:
+            print("Error: Could not find the target 'initial begin' block with $dumpfile.")
+    else:
+        print("Error: Could not find the tb_match/tb_mismatch wire declarations.")
+
+def process_RefModule_TopModule(file_path, old_text, new_text):
+
+    # 1. Read the file content
+    with open(file_path, "r") as file:
+        content = file.read()
+
+    # 2. Use word boundaries (\b) to match ONLY the exact word
+    # This prevents matching "RefModule_abc" or "MyRefModule"
+    pattern = r"\b" + re.escape(old_text) + r"\b"
+    modified_content = re.sub(pattern, new_text, content)
+
+    # 3. Write the modified content back to the file
+    with open(file_path, "w") as file:
+        file.write(modified_content)
+
+    print(f"Success: Replaced exact word '{old_text}' with '{new_text}'.")
+
+
+
+# Copy VerilogEval benchmark to customize folder
+def process_copy_benchmark(line):
+
+    global ds_name_only
+
+    EV_problem_path = os.path.join(VE_path, "problems.txt")
+
+    filename = EV_problem_path
+    line_number = line  # 1-indexed
+
+    # Get the specific line (returns an empty string if line doesn't exist)
+    line = linecache.getline(filename, line_number)
+
+    ds_name_only = process_filter_name(line.strip())
+
+    process_create_folder(ds_name_only)
+
+    ref_design_path = os.path.join(VE_path, line.strip() + '_ref.sv')
+
+    tb_path = os.path.join(VE_path, line.strip() + '_test.sv')
+
+    prompt_path = os.path.join(VE_path, line.strip() + '_prompt.txt')
+
+    # print(ref_design_path, target_path)
+    
+    process_copy(ref_design_path, os.path.join(cust_path, ds_name_only, 'verified_'+ ds_name_only + '.sv'))
+    
+    process_copy(tb_path, os.path.join(cust_path, ds_name_only, "testbench.sv"))
+
+    process_copy(prompt_path, os.path.join(cust_path, ds_name_only, "design_description.txt"))
+
+
+
+def process_customize_folder():
+
+    #Still consist RefModule
+    ref_design_path = os.path.join(cust_path, ds_name_only, 'verified_'+ ds_name_only + '.sv')
+
+    tb_path = os.path.join(cust_path, ds_name_only, "testbench.sv")
+
+    description_path = os.path.join(cust_path, ds_name_only, "design_description.txt")
+
+    process_rename_RefModule(ref_design_path, f"verified_{ds_name_only}")
+
+    process_fix_tb_declare(tb_path)
+
+    process_RefModule_TopModule(tb_path, "RefModule", f"verified_{ds_name_only}")
+
+    process_RefModule_TopModule(tb_path, "TopModule", ds_name_only)
+
+    # Replace TopModule with design name in design description
+    process_RefModule_TopModule(description_path, "TopModule", ds_name_only)
+
+
+
+if __name__ == "__main__":
+
+    start_problem = 145
+
+    end_problem = 157
+
+    for i in range(start_problem, end_problem):
+
+        # Copy VerilogEval to customize folder
+        process_copy_benchmark(i)
+
+        # Modify files after copying
+        process_customize_folder()

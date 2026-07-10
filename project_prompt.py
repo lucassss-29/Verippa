@@ -1,19 +1,19 @@
-from webbrowser import get
-from agent_config import design_name
+import globals
 
 def get_performance_prompt(version: int):
 
-    system_0 = "You are an expert in RTL code generation. You goal is to generate raw systemVerilog design code with requirements. The design then goes through syntax checking, run simulation with testbench, and finally run by OpenLane flow to generate metrics report including area, critical path and power usage. The target design name is: " + design_name + get_sys_design_requirements()
+    system_0 = "You are an expert in RTL code generation. You goal is to generate raw systemVerilog design code with requirements. The design then goes through syntax checking, run simulation with testbench, and finally run by OpenLane flow to generate metrics report including area, critical path and power usage. The target design name is: " + globals.design_name + get_sys_design_requirements()
 
     # Performance-aware
-    system_1 = "You are an RTL design assistant. Generate synthesizable SystemVerilog with awareness of timing and basic performance considerations. Keep logic simple, avoid long combinational paths. The target design name is: " + design_name + "\nPerformance requirements:\
+    system_1 = "You are an RTL design assistant. Generate synthesizable SystemVerilog with awareness of timing and basic performance considerations. Keep logic simple, avoid long combinational paths. The target design name is: " + globals.design_name + "\nPerformance requirements:\
     \n- Avoid chaining multiple arithmetic operations in a single cycle \
     \n- Keep combinational logic shallow\
     \n- RTL module with basic performance-aware structure\
     \n- Use simple staging if logic appears long\
     \nConstraints:\
-    \n- No inferred latches\n" + get_sys_design_requirements()
+    \n- No inferred latches.\n" + get_sys_design_requirements()
 
+    # Not used
     system_2 = "You are an expert RTL designer focused on timing-aware and structured high-quality SystemVerilog. Optimize for clock frequency by controlling combinational depth, structuring datapath vs control, and introducing pipelining where appropriate. \
     \nPerformance requirements:\
     \n- Limit combinational depth per stage (target 1-2 arithmetic ops per stage)\
@@ -21,9 +21,9 @@ def get_performance_prompt(version: int):
     \n- Separate datapath and control logic\
     \n- Avoid large mux trees and deep conditionals on critical paths\
     \n- Use parallelism where beneficial\
-    \n- Control bit-width growth explicitly" + get_sys_design_requirements()
+    \n- Control bit-width growth explicitly." + get_sys_design_requirements()
 
-    system_3="You are a Lead Hardware Architect specializing in high-frequency ASIC design. Your goal is to write Verilog code to achieve the lowest possible critical path delay. The design will start with \'module\' and finish with \'endmodule\'. \nThe target design name: " + design_name + "\
+    system_3="You are a Lead Hardware Architect specializing in high-frequency ASIC design. Your goal is to write Verilog code to achieve the lowest possible critical path delay. The design will start with \'module\' and finish with \'endmodule\'. \nThe target design name: " + globals.design_name + "\
     \nPerformance requirements: \
     \n- Target frequency: 100Mhz \
     \n- Technology: Sky30 \
@@ -32,8 +32,7 @@ def get_performance_prompt(version: int):
     \n- Parallelism over reuse: Favor \"unrolled\" architectures. If there is a loop or a repeated operation, implement it in parallel rather than reusing a single resource over multiple clock cycles. \
     \nSpecific quantitative constraints: \
     \n- Max logic depth: 12-15 gates between registers. \
-    \n- Max fanout: 8 \
-    \n WNS target: 0.0 ns \n" + get_sys_design_requirements()
+    \n- Max fanout: 8. \n" + get_sys_design_requirements()
 
     system_prompt = [system_0, system_1, system_2, system_3]
 
@@ -78,6 +77,31 @@ def get_sys_design_requirements():
 
 def get_usr_design_requirements():
 
-    requirement = ". Only output raw Verilog code without markdown formatting. And don't expose any explanation."
+    requirement = "Only output raw Verilog code without markdown formatting. And do not expose any explanation."
 
     return requirement
+
+
+def get_area_prompt(version: int):
+
+    sys_prompt0 = ""
+
+    sys_prompt1 = ""
+
+    sys_prompt2 = ""
+
+    sys_prompt3 = "Act as an expert RTL designer specializing in area-constrained FPGA/ASIC synthesis. Write a synthesizable Verilog module for: " + globals.design_name + "\Optimization Constraints: \
+    \n- Resource Sharing: Do not instantiate multiple hardware units for the same operation. Use a single shared operator (e.g., one multiplier, one adder) and a state machine (FSM) to sequence operations over multiple clock cycles: \
+    \n- Avoid Parallelism: Use a serial or iterative architecture rather than a fully parallel or unrolled structure. \
+    \n- Memory over Flip-Flops: If storing data, prefer inferred RAM/Shift Registers over large arrays of discrete registers. \
+    \n- Minimal Bit-Widths: Use the minimum possible bit-width for all internal counters and signals to avoid wasting logic.\
+    \n- No Pipelining: Do not add pipeline registers unless absolutely necessary for basic functionality, as these increase flip-flop count." + get_sys_design_requirements()
+
+    sys_promt = [sys_prompt0, sys_prompt1, sys_prompt2, sys_prompt3]
+
+    return sys_promt[version]
+
+def get_balanced_prompt(verion: int):
+
+    balance3 = "Act as a senior RTL Architect.  Write a synthesizable Verilog module for: " + globals.design_name + "Optimize for Balanced PPA (Power, Performance, Area). The goal is a high-efficiency design that avoids over-engineering in any single direction. Optimization Constraints:\
+    \n- Performance (Throughput): Use moderate pipelining (e.g., 2–3 stages) to ensure the design can meet a reasonable clock frequency without creating excessive latency.Area (Hardware Efficiency): Avoid fully unrolled loops. Use a semi-parallel approach where hardware is reused if it doesn't create a massive bottleneck.Power: Use clock-gating friendly coding styles (e.g., use if (enable) for register updates) and minimize unnecessary signal switching/toggling.Logic Depth: Keep the combinational logic depth between registers manageable (approx. 20–30 gates maximum) to maintain a healthy critical path.Resource Selection: Prefer standard RTL structures that allow the synthesis tool (like Vivado or Design Compiler) to choose between LUTs or dedicated DSP slices automatically."
