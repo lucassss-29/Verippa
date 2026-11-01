@@ -8,6 +8,9 @@ import json
 from enum import Enum, auto
 import globals
 from auto_code_generation import openlane_generation
+import shutil
+import glob
+from agent_config import fetch_workflow_variables
 
 ADJUST_CLOCK_PED = 10
 
@@ -23,12 +26,13 @@ def openlane_flow_run(is_init: bool, run_tag):
     # Mount the OpenLane designs folder to current workspace
     openlane_symlink_folder()
 
-    with open(ac.log_path, 'a') as file:
+    with open(globals.app_usage_dict['log_path'], 'a') as file:
         file.write(f"LOG {run_tag}\n")
 
     # Initialize output_log content
     output_log = ""
 
+    # Specific folder in OpenLane directory
     ol_designname_folder = os.path.join(ac.openlane_dir, ac.model, globals.design_name)
 
     if not os.path.exists(ol_designname_folder):
@@ -36,6 +40,10 @@ def openlane_flow_run(is_init: bool, run_tag):
         os.makedirs(ol_designname_folder)
 
     try:
+        print(ac.design_path)
+
+        print(ol_designname_folder)
+
         path = shutil.copy(ac.design_path, ac.ol_designname_folder)
         
         ac.show_log(f"\n[OL] Copied design files to {path}\n")
@@ -95,6 +103,8 @@ def openlane_flow_run(is_init: bool, run_tag):
 
             log_file.write(output_log)
 
+        globals.app_usage_dict['openlane_trace_path'] = ac.ol_raw_log
+
         if return_code == 0:
 
             ac.show_log("\n[OL] OpenLane flow completed.\n")
@@ -112,7 +122,7 @@ def openlane_flow_run(is_init: bool, run_tag):
 
             if err_extract:
 
-                with open(ac.ol_log_path, 'w') as file:
+                with open(globals.app_usage_dict['ol_log_path'], 'w') as file:
 
                     file.write(err_extract)
 
@@ -132,6 +142,67 @@ def openlane_flow_run(is_init: bool, run_tag):
         print(f"Exception failed to run OpenLane flow: {e}\n")
 
         return False
+    
+def openlane_run_exploration():
+
+    openlane_extract_json_update_matrix()
+
+    expl_log = ""
+
+    expl_command = f"python3 ./run_designs.py --matrix ./explore_matrix.json --threads 6 {globals.design_name} --tag {globals.timestamp_tag} --disable_timestamp"
+
+    inner_command = f"{expl_command}\nexit\n"
+
+    try:
+
+        if not os.path.exists(ac.openlane_dir):
+            print(f"ERROR: The directory '{ac.openlane_dir}' does not exist!")
+
+        # Execute the container and run the inner command non-interactively
+        process = subprocess.Popen(
+            ["make", "mount"],
+            cwd=ac.openlane_dir,
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True
+        )
+
+        process.stdin.write(inner_command)
+        process.stdin.flush()
+        # process.stdin.close()
+
+        # for line in iter(process.stdout.readline, ''):
+        for line in process.stdout:
+            # Print each line to your terminal as it's generated
+            print(line, end='') 
+
+            expl_log += line
+
+        # process.stdout.close()  
+        # return_code = process.wait()
+
+        if not os.path.exists(os.path.dirname(ac.ol_expl_log)):
+
+            os.mkdir(os.path.dirname(ac.ol_expl_log))
+
+        with open(ac.ol_expl_log, 'w') as log_file:
+
+            ac.show_log(f"[OL] Writing OpenLane exploration log to {ac.ol_expl_log}\n")
+
+            log_file.write(expl_log)
+
+
+        ac.show_log("\n[OL] OpenLane exploration completed.\n")
+
+        delete_path = os.path.join(ac.openlane_dir, "designs", globals.design_name)
+
+        openlane_delete_temp_items(delete_path)
+        
+    except Exception as e:
+
+        print(f"Exception failed to run OpenLane flow: {e}\n")
+
     
 # Purpose: extract error keyword by re and its path (if any)
 def openlane_parse_error():
@@ -220,6 +291,70 @@ def openlane_update_json():
     ac.show_log(f"Updated successfully with CLOCK_PERIOD: {ADJUST_CLOCK_PED}\n")
 
 
+def openlane_extract_json_update_matrix():
+
+
+    with open(ac.ol_json_path, "r") as f:
+        data = json.load(f)
+
+    current_period = data.get("CLOCK_PERIOD")
+
+    # Optional configuration in default file
+    current_util = data.get("FP_CORE_UTIL")
+
+    matrix_config = {
+        "preload": {
+            "DESIGN_NAME": globals.design_name,
+            "RUN_KLAYOUT": False,
+            "GLB_RESIZER_TIMING_OPTIMIZATIONS": True
+        }
+    }
+
+    type = "Performance"
+
+    match type:
+
+        case "Performance":
+
+            list_clk = [current_period - 6, current_period - 5, current_period - 4, current_period - 2]
+
+            matrix_config["CLOCK_PERIOD"] = list_clk
+            matrix_config["SYNTH_STRATEGY"] = ["DELAY 0", "DELAY 2", "DELAY 4"]
+
+            if current_util is not None:
+
+                list_util = [current_util - 10, current_util - 5, current_util]
+                matrix_config["FP_CORE_UTIL"] = list_util
+
+            else:
+                # Default core util 50
+                matrix_config["FP_CORE_UTIL"] = [35, 40, 45]
+
+            matrix_config["PL_TARGET_DENSITY"] = [0.40, 0.55]
+
+            # matrix_config["CLOCK_PERIOD"] = [8]
+
+            # matrix_config["SYNTH_STRATEGY"] = ["DELAY 0"]
+
+            # matrix_config["FP_CORE_UTIL"] = [40]
+
+            # matrix_config["PL_TARGET_DENSITY"] = [0.40]
+
+        case "Power":
+            pass
+
+        case "Area":
+            pass
+
+        case _:
+            pass
+
+    with open(ac.ol_json_matrix, "w", encoding="utf-8") as f:
+        json.dump(matrix_config, f, indent=4)
+
+    ac.show_log("Update exploration .json file done\n")
+
+
 # Find in raw log step number of failed setup.
 def openlane_error_find_step():
 
@@ -242,7 +377,7 @@ def openlane_error_find_step():
     
     else:
 
-        with open(ac.ol_log_path, 'r') as log_file:
+        with open(globals.app_usage_dict['ol_log_path'], 'r') as log_file:
 
             log_data = log_file.read()
 
@@ -297,8 +432,16 @@ def openlane_error_linter():
 
 def openlane_correct(msg, attempt):
 
+    primary_detailed_log_path = ""
+
     # First mainly log path from error parsing
-    primary_detailed_log_path = ac.ol_summary_path
+    if os.path.exists(ac.ol_path_extracted):
+
+        with open(ac.ol_path_extracted, 'r') as f:
+        
+            extracted_path = f.readline().strip()
+
+            primary_detailed_log_path = os.path.join(ac.openlane_dir, extracted_path)
 
     issue = "unknown issue"
 
@@ -318,7 +461,21 @@ def openlane_correct(msg, attempt):
 
         case 1:
             # STEP 1
+            with open(ac.ol_raw_log, 'r') as f:
+
+                output_log = f.read()
+
+                pattern = r'Running Synthesis.*?log:\s*([^)]+)'
+
+                match = re.search(pattern, output_log)
+
+                if match:
+                    synthesis_path = match.group(1)
+
+                    primary_detailed_log_path = os.path.join(ac.openlane_dir,synthesis_path)
+
             issue = OpenLaneIssue.REGEN_DESIGN
+
             pass
 
         case 31:
@@ -342,7 +499,16 @@ def openlane_correct(msg, attempt):
             with open(ac.ol_json_path, "r") as f:
                 data = json.load(f)
 
-            data["FP_CORE_UTIL"] = 0.4
+            if data.get("FP_CORE_UTIL") is None:
+
+                # Default is 50, offset minus 5 for each time.
+                data["FP_CORE_UTIL"] = 45
+
+            elif data.get("FP_CORE_UTIL") > 5:
+
+                data["FP_CORE_UTIL"] = data.get("FP_CORE_UTIL") - 5
+            else:
+                data["FP_CORE_UTIL"] = 2
 
             with open(ac.ol_json_path, "w") as f:
 
@@ -371,3 +537,29 @@ def openlane_correct(msg, attempt):
             return "Unknown status"
 
 
+def openlane_delete_temp_items(path):
+
+    search_pattern = os.path.join(path, "runs", "RUN_EX_*")
+
+    # Remove folders
+    for folder_path in glob.glob(search_pattern):
+        if os.path.isdir(folder_path):
+            current_folder_name = os.path.basename(folder_path)
+
+            if current_folder_name == globals.exploration_tag:
+                print(f"Skipping (Preserving): {folder_path}")
+                continue
+
+            print(f"Deleting folder: {folder_path}")
+            shutil.rmtree(folder_path)
+
+    # Remove files
+    # json_pattern = os.path.join(path, f"{globals.timestamp_tag}_config_*.json")
+    
+    # for file_path in glob.glob(json_pattern):
+    #     # Ensure it is a file, not a folder
+    #     if os.path.isfile(file_path):  
+    #         print(f"Deleting file: {file_path}")
+    #         os.remove(file_path)
+
+    

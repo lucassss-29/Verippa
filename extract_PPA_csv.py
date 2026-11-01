@@ -1,5 +1,5 @@
 import pandas as pd
-from agent_config import show_log, prj_dir, gs_title, gs_sheet, prompt_version
+from agent_config import show_log, prj_dir, gs_title, gs_sheet
 import gspread
 import globals
 
@@ -53,7 +53,7 @@ def extract_ppa_to_excel(path_csv, syn_attempt, sim_attempt, ol_attempt, mins):
 
         ppa_df['Duration (mins)'] = mins
 
-        ppa_df['version'] = f"v{prompt_version}"
+        ppa_df['version'] = f"v{globals.prompt_version}"
 
         ppa_df['prompt_token'] = globals.running_total_tokens
 

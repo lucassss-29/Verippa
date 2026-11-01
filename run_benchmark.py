@@ -24,6 +24,7 @@ def copy_benchmark_design():
 
     shutil.copy(bm_file, target_file)
 
+    # Return target new path containing new code
     with open(target_file, 'r') as file:
         
         content = file.read()
@@ -36,5 +37,7 @@ def copy_benchmark_design():
             f.write(new_content)
 
     print(f"Copied benchmark design file to {target_file}\n")
+
+    return target_file
 
 

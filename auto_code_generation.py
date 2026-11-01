@@ -11,6 +11,7 @@ from handle_testbench import check_tb_include_external
 import globals
 from google import genai
 from google.genai import types
+import itertools
 
 
 load_dotenv()  # takes environment variables from .env.
@@ -19,12 +20,77 @@ set_temper = 0.2
 
 # Return client
 
+class ChatgptAdapter:
+    def __init__(self):
+        self.client = OpenAI(api_key=os.getenv('CHATGPT_API_KEY'))
+
+    def generate(self, msg):
+        return self.client.responses.create(
+            model="gpt-5.4",
+            reasoning={
+                "effort": "medium",
+                "summary": "auto"},
+            input=msg,
+            stream=True
+        )
+
+
+class DeepseekAdapter:
+    def __init__(self):
+        self.client = OpenAI(api_key=os.getenv('DEEPSEEK_API_KEY'), base_url='https://api.deepseek.com')
+
+    def generate(self, msg):
+        
+        try:
+            stream = self.client.chat.completions.create(
+                model="deepseek-v4-pro",
+                messages=msg,
+                reasoning_effort="high",
+                extra_body={"thinking": {"type": "enabled"}},
+                stream=True,
+                stream_options={"include_usage": True}
+            )
+
+            return stream
+        
+        except Exception as e:
+            if hasattr(e, "response") and e.response is not None:
+                print("Status:", e.response.status_code)
+                print("Body:", e.response.text)   
+            raise
+    
+class GeminiAdapter:
+    def __init__(self):
+        self.client = genai.Client(api_key=os.getenv('GEMINI_API_KEY'))
+
+        instruction = get_performance_prompt(globals.prompt_version)
+
+        self.chat = self.client.chats.create(
+            model='gemini-2.5-pro',
+            config=types.GenerateContentConfig(
+                system_instruction=instruction,
+                thinking_config=types.ThinkingConfig(include_thoughts=True)
+            )
+        )
+
+    def generate(self, prompt):
+
+        return self.chat.send_message_stream(prompt)
+
+
+LLM_CLIENTS = {
+    'chatgpt': ChatgptAdapter(),
+    'deepseek': DeepseekAdapter(),
+    'gemini': GeminiAdapter()
+}
+
+'''
 # When using Gemini
 # cli = genai.Client(api_key=os.getenv('GEMINI_API_KEY'))
 
 # # System_instruction can be only added once
 # # Extract system prompt, #0 system, #1 user
-# instruction = get_performance_prompt(3)
+# instruction = get_performance_prompt(globals.prompt_version)
 
 # client = cli.chats.create(model='gemini-2.5-pro', config=types.GenerateContentConfig(
 #         # 1. System Instruction: Define model behavior
@@ -41,8 +107,8 @@ set_temper = 0.2
 # client = OpenAI(api_key=os.getenv('DEEPSEEK_API_KEY'), base_url="https://api.deepseek.com")
 
 # When using ChatGPT
-client = OpenAI(api_key=os.getenv('CHATGPT_API_KEY'))
-
+# client = OpenAI(api_key=os.getenv('CHATGPT_API_KEY'))
+'''
 ext_content = ""
 
 TB_INCLUSION = True
@@ -51,7 +117,7 @@ def llm_generation(is_design: str, msg, attempt: int, phase: str):
 
     # auto_temper_increasement(attempt)
     try:
-        complete_text = auto_call_provider(msg, ac.AI_provider)
+        complete_text = auto_call_provider(msg, globals.AI_provider)
 
     except InternalServerError:
         print("Exception: Server overloaded. Reasoning models are busy.")
@@ -117,45 +183,58 @@ def auto_call_provider(msg, provider):
 
     full_response_text = ""
 
-    if provider.lower() == "gemini":
+    print('provider: ', provider)
+
+    if provider.lower() == "gemini 2.5 pro":
 
         has_started_content = False
         has_started_reasoning = False
-        full_response_text = ""
+        full_answer = ""
         last_chunk = None
 
         # Use send_message_stream instead of send_message
-        response_stream = client.send_message_stream(msg[-1]['content'])
+        # response_stream = client.send_message_stream(msg[-1]['content'])
+        stream_response = LLM_CLIENTS['gemini'].generate(msg[-1]['content'])
+
+        agent_stream, app_stream = itertools.tee(stream_response, 2)
+
+        globals.app_usage_dict['stream_object'] = app_stream
 
         try:
-            for chunk in response_stream:
+            for chunk in agent_stream:
 
-                for part in chunk.candidates[0].content.parts:
+                if chunk.candidates and chunk.candidates[0].content and chunk.candidates[0].content.parts:
 
-                    if part.text:
-                        if part.thought:
+                    for part in chunk.candidates[0].content.parts:
 
-                            if not has_started_reasoning:
-                                print("\n--- BEGIN REASONING ---\n")
+                        if part.text:
+                            if part.thought:
 
-                                has_started_reasoning = True
+                                if not has_started_reasoning:
+                                    print("\n--- BEGIN REASONING ---\n")
 
-                            print(part.text, end="", flush=True)
+                                    has_started_reasoning = True
 
-                        else:
+                                # print(part.text, end="", flush=True)
 
-                            if not has_started_content:
-                                print("\n\n--- BEGIN FINAL ANSWER ---\n")
+                            else:
 
-                                has_started_content = True
+                                if not has_started_content:
+                                    print("\n\n--- BEGIN FINAL ANSWER ---\n")
 
-                            # When it switches to final text, reset or add a separator
-                            print(part.text, end="", flush=True)
+                                    has_started_content = True
 
-                            full_response_text += part.text
+                                # When it switches to final text, reset or add a separator
+                                # print(part.text, end="", flush=True)
+
+                                full_answer += part.text
 
                 # The very last 'chunk' will contain the metadata        #    
                 last_chunk = chunk
+
+            full_response_text = full_answer
+
+            print('\nFull response: \n', full_response_text)
 
             msg.append({"role": "model", "content": full_response_text})
                 
@@ -171,21 +250,29 @@ def auto_call_provider(msg, provider):
             globals.running_total_tokens += turn_total
 
 
-    elif provider.lower() == "deepseek":
+    elif provider.lower() == 'deepseek v4 pro':
 
-        stream = client.chat.completions.create(
-            model="deepseek-reasoner",
-            messages=msg,
-            temperature=set_temper,
-            stream=True
-        )
+        # stream = client.chat.completions.create(
+        #     model="deepseek-v4-pro",
+        #     messages=msg,
+        #     reasoning_effort="high",
+        #     extra_body={"thinking": {"type": "enabled"}},
+        #     stream=True,
+        #     stream_options={"include_usage": True}
+        # )
+
+        stream_response = LLM_CLIENTS['deepseek'].generate(msg)
+
+        agent_stream, app_stream = itertools.tee(stream_response, 2)
+
+        globals.app_usage_dict['stream_object'] = app_stream
 
         has_started_content = False
         has_started_reasoning = False
 
         full_answer = []
 
-        for chunk in stream:
+        for chunk in agent_stream:
 
             delta = chunk.choices[0].delta
             if hasattr(delta, 'reasoning_content') and delta.reasoning_content:
@@ -194,7 +281,8 @@ def auto_call_provider(msg, provider):
                     print("\n--- BEGIN REASONING ---\n")
                     has_started_reasoning = True
 
-                print(delta.reasoning_content, end="", flush=True)
+                # Save time
+                # print(delta.reasoning_content, end="", flush=True)
 
             if delta.content:
                 if not has_started_content:
@@ -203,8 +291,12 @@ def auto_call_provider(msg, provider):
 
                 answer_piece = delta.content
 
-                print(answer_piece, end="", flush=True)
+                # print(answer_piece, end="", flush=True)
                 full_answer.append(answer_piece)
+
+            if chunk.usage is not None:
+
+                globals.running_total_tokens += chunk.usage.total_tokens
 
         print("\n--- END OF RESPONSE ---\n")
 
@@ -212,29 +304,43 @@ def auto_call_provider(msg, provider):
 
         msg.append({"role": "assistant", "content": full_response_text})
 
-    elif provider.lower() == "chatgpt":
+
+    elif provider.lower() == "chatgpt 5.4":
 
         full_answer = []
 
-        with client.responses.stream(
-            model="gpt-5.4",
-            input=msg,
-            reasoning={"effort": "medium"}
-            # stream=True
-            # temperature=set_temper # Gpt5.4 not support temperature
-        ) as stream:
+        print('provider.lower(): ', provider.lower())
 
-            # GPT5 not support showing 
-            for event in stream:
+        stream_response = LLM_CLIENTS["chatgpt"].generate(msg)
 
-                if event.type == "response.output_item.added" and event.item.type == "reasoning":
-                    print("\nModel is initializing deep reasoning...\n")
+        agent_stream, app_stream = itertools.tee(stream_response, 2)
 
-                elif event.type == "response.output_text.delta":
-                    print(event.delta, end="", flush=True)
-                    full_answer.append(event.delta)
+        globals.app_usage_dict['stream_object'] = app_stream
 
-        response = stream.get_final_response()
+        # with client.responses.stream(
+        #     model="gpt-5.4",
+        #     input=msg,
+        #     reasoning={"effort": "medium"}
+        #     # stream=True
+        #     # temperature=set_temper # Gpt5.4 not support temperature
+        # ) as stream:
+
+        # with agent_stream as stream:
+
+        # GPT5 support show reasoning summary
+        for event in agent_stream:
+
+            if event.type == "response.output_item.added" and event.item.type == "reasoning":
+                print("\nModel is initializing deep reasoning...\n")
+
+            elif event.type == "response.reasoning_summary_text.delta":
+                print(event.delta, end="", flush=True)
+
+            elif event.type == "response.output_text.delta":
+                print(event.delta, end="", flush=True)
+                full_answer.append(event.delta)
+
+        response = agent_stream.get_final_response()
 
         globals.running_total_tokens += response.usage.total_tokens
 
@@ -352,10 +458,11 @@ def openlane_generation(msg, err_path, attempt, phase):
 
     try:
 
-        ds_description = read_description(ac.benchmark_design_path)
+        # ds_description = read_description(ac.benchmark_design_path)
+        ds_description = globals.design_description
 
         # Open openlane.log
-        with open(ac.ol_log_path) as f:
+        with open(globals.app_usage_dict['ol_log_path']) as f:
 
             err = f.read()
 
@@ -375,11 +482,11 @@ def openlane_generation(msg, err_path, attempt, phase):
 
             if ac.PPA_type == 'Performance':
             
-                sys_pt += get_performance_prompt(ac.prompt_version)
+                sys_pt += get_performance_prompt(globals.prompt_version)
             
             elif ac.PPA_type == 'Area':
 
-                sys_pt += get_area_prompt(ac.prompt_version)
+                sys_pt += get_area_prompt(globals.prompt_version)
 
             msg.append({"role": ac.system_role, "content": sys_pt})
 
@@ -397,6 +504,3 @@ def openlane_generation(msg, err_path, attempt, phase):
 
         print(f"Exception during Openlane generation: {e}")
 
-# llm_generation("design", "", 1, 1)
-
-# auto_call_provider([], ac.AI_provider)

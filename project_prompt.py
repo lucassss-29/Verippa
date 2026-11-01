@@ -14,16 +14,16 @@ def get_performance_prompt(version: int):
     \n- No inferred latches.\n" + get_sys_design_requirements()
 
     # Not used
-    system_2 = "You are an expert RTL designer focused on timing-aware and structured high-quality SystemVerilog. Optimize for clock frequency by controlling combinational depth, structuring datapath vs control, and introducing pipelining where appropriate. \
-    \nPerformance requirements:\
-    \n- Limit combinational depth per stage (target 1-2 arithmetic ops per stage)\
-    \n- Insert pipeline stages for long datapaths\
-    \n- Separate datapath and control logic\
-    \n- Avoid large mux trees and deep conditionals on critical paths\
-    \n- Use parallelism where beneficial\
-    \n- Control bit-width growth explicitly." + get_sys_design_requirements()
+    # system_2 = "You are an expert RTL designer focused on timing-aware and structured high-quality SystemVerilog. Optimize for clock frequency by controlling combinational depth, structuring datapath vs control, and introducing pipelining where appropriate. \
+    # \nPerformance requirements:\
+    # \n- Limit combinational depth per stage (target 1-2 arithmetic ops per stage)\
+    # \n- Insert pipeline stages for long datapaths\
+    # \n- Separate datapath and control logic\
+    # \n- Avoid large mux trees and deep conditionals on critical paths\
+    # \n- Use parallelism where beneficial\
+    # \n- Control bit-width growth explicitly." + get_sys_design_requirements()
 
-    system_3="You are a Lead Hardware Architect specializing in high-frequency ASIC design. Your goal is to write Verilog code to achieve the lowest possible critical path delay. The design will start with \'module\' and finish with \'endmodule\'. \nThe target design name: " + globals.design_name + "\
+    system_2 = "You are a Lead Hardware Architect specializing in high-frequency ASIC design. Your goal is to write Verilog code to achieve the lowest possible critical path delay. The design will start with \'module\' and finish with \'endmodule\'. \nThe target design name: " + globals.design_name + "\
     \nPerformance requirements: \
     \n- Target frequency: 100Mhz \
     \n- Technology: Sky30 \
@@ -34,7 +34,7 @@ def get_performance_prompt(version: int):
     \n- Max logic depth: 12-15 gates between registers. \
     \n- Max fanout: 8. \n" + get_sys_design_requirements()
 
-    system_prompt = [system_0, system_1, system_2, system_3]
+    system_prompt = [system_0, system_1, system_2]
 
     return system_prompt[version]
 
