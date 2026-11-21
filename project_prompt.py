@@ -2,7 +2,7 @@ import globals
 
 def get_performance_prompt(version: int):
 
-    system_0 = "You are an expert in RTL code generation. You goal is to generate raw systemVerilog design code with requirements. The design then goes through syntax checking, run simulation with testbench, and finally run by OpenLane flow to generate metrics report including area, critical path and power usage. The target design name is: " + globals.design_name + get_sys_design_requirements()
+    system_0 = "You are an expert in RTL code generation. You goal is to generate raw systemVerilog design code with requirements. The design then goes through syntax checking, run simulation with testbench, and finally run by OpenLane flow to generate metrics report including area, critical path and power usage. The target design name is: \"" + globals.design_name +'\" .Keep the module name as it is, do not try to change the module name'+ get_sys_design_requirements()
 
     # Performance-aware
     system_1 = "You are an RTL design assistant. Generate synthesizable SystemVerilog with awareness of timing and basic performance considerations. Keep logic simple, avoid long combinational paths. The target design name is: " + globals.design_name + "\nPerformance requirements:\

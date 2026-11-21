@@ -1,4 +1,5 @@
 import os
+from pickle import GLOBAL
 import time
 import globals
 from enum import Enum, auto
@@ -24,34 +25,64 @@ class State(Enum):
     WRITE_CSV = auto()
     DONE = auto()
     ERROR = auto()
+    STREAMLIT_NON_EXIT = auto()
 
 class BenchmarkType(Enum):
     RTLLM = auto()
     CHIPGPTV = auto()
     VERILOGEVAL = auto()
 
+PPA_Strategy_Dt = {
+    'B': 'Balanced Mode',
+    'P1': 'Power Optimization',
+    'A1': 'Area Optimization',
+    'P2': 'Performance Optimization'
+}
+
 # Global variables
 max_attempts = 5
 
+MAX_OL_EXPLORATION = 15
+
 # ///// WORKING SESSION /////
 
-globals.agent_step = State.VERIFY_SYNTAX
+globals.agent_step = State.INITIAL
+
+benchmark = BenchmarkType.RTLLM
+
+# Represent as the parent folder for holding artifacts.
+
+def setup_ggsheet_name(ppa_stra):
+
+    if ppa_stra == PPA_Strategy_Dt.get('B'):
+
+        globals.gs_title = "balanced_metrics_enhance"
+
+        globals.gs_sheet = f"balanced_{benchmark.name}_benchmark"
+
+    elif ppa_stra == PPA_Strategy_Dt.get('P1'):
+
+        globals.gs_title = "power_metrics_enhance"
+
+        globals.gs_sheet = f"power_{benchmark.name}_benchmark"
+
+    elif ppa_stra == PPA_Strategy_Dt.get('A1'):
+
+        globals.gs_title = "area_metrics_enhance"
+
+        globals.gs_sheet = f"area_{benchmark.name}_benchmark"
+
+    elif ppa_stra == PPA_Strategy_Dt.get('P2'):
+
+        globals.gs_title = "performance_metrics_enhance"
+
+        globals.gs_sheet = f"performance_{benchmark.name}_benchmark"
+
+    globals.local_folder = globals.gs_sheet
 
 # Constant
 PPA_type = 'Performance'
 
-gs_title = "ppa_metrics_enhance"
-
-gs_sheet = "App_user_demo"
-
-globals.timestamp_tag = ""
-
-globals.exploration_tag = ""
-
-# Represent as the parent folder for holding artifacts.
-model = gs_sheet
-
-benchmark = BenchmarkType.RTLLM
 # ///// WORKING SESSION /////
 
 design_list = [
@@ -59,7 +90,7 @@ design_list = [
     "adder_16bit",
     "adder_32bit",
     "adder_8bit",
-    "adder_pipe_64bit",
+    "adder_pipe_64bit", #4
     "alu",
     "asyn_fifo",
     "calendar",
@@ -152,6 +183,8 @@ def fetch_workflow_variables():
 
     global benchmark_design_path, design_folder_path, design_path, tb_path, ol_path_extracted, ol_summary_path, ol_designname_folder, ol_json_path, ol_raw_log, benchmark_folder, system_role, ol_json_matrix, ol_expl_log
 
+    setup_ggsheet_name(globals.PPA_strategy)
+
     if globals.AI_provider.lower() == "chatgpt 5.4":
         system_role = "developer"
     
@@ -172,21 +205,21 @@ def fetch_workflow_variables():
 
     benchmark_design_path = os.path.join(prj_dir, benchmark_folder, globals.design_name, "design_description.txt")
 
-    design_folder_path = os.path.join(prj_dir, model, globals.design_name)
+    design_folder_path = os.path.join(prj_dir, globals.local_folder, globals.design_name)
 
     if benchmark == BenchmarkType.VERILOGEVAL:
 
-        design_path = os.path.join(prj_dir, model, globals.design_name, f"{globals.design_name}.sv")
+        design_path = os.path.join(prj_dir, globals.local_folder, globals.design_name, f"{globals.design_name}.sv")
 
         tb_path = os.path.join(prj_dir, benchmark_folder, globals.design_name, "testbench.sv")
     
     else:
-        design_path = os.path.join(prj_dir, model, globals.design_name, f"{globals.design_name}.v")
+        design_path = os.path.join(prj_dir, globals.local_folder, globals.design_name, f"{globals.design_name}.v")
 
         tb_path = os.path.join(prj_dir, benchmark_folder, globals.design_name, "testbench.v")
 
 
-    globals.app_usage_dict['out_conversation_path'] = os.path.join(prj_dir, model, globals.design_name, f"{globals.design_name}_conversation.txt")
+    globals.app_usage_dict['out_conversation_path'] = os.path.join(prj_dir, globals.local_folder, globals.design_name, f"{globals.design_name}_conversation.txt")
 
     # success log after go through done state
     globals.app_usage_dict['log_path'] = os.path.join(design_folder_path, "flow.log")
@@ -204,15 +237,17 @@ def fetch_workflow_variables():
     # Summary openlane log
     ol_summary_path = os.path.join(design_folder_path, "openlane_llmaid_log_summary.log")
 
-    ol_designname_folder = os.path.join(openlane_dir, model, globals.design_name, f"{globals.design_name}.v")
+    ol_designname_folder = os.path.join(openlane_dir, globals.local_folder, globals.design_name, f"{globals.design_name}.v")
 
-    ol_json_path = os.path.join(ol_source_mount, globals.design_name, "config.json")
+    ppa_flipped_dict = {value: key for key, value in PPA_Strategy_Dt.items()}
+
+    ol_json_path = os.path.join(ol_source_mount, globals.design_name,"config.json")
 
     ol_json_matrix = os.path.join(openlane_dir, "explore_matrix.json")
 
-    ol_raw_log = os.path.join(prj_dir, "Openlane", model, f"{globals.design_name}_raw_log.txt")
+    ol_raw_log = os.path.join(prj_dir, "Openlane", globals.local_folder, f"{globals.design_name}_raw_log.txt")
 
-    ol_expl_log = os.path.join(prj_dir, "Openlane", model, f"{globals.design_name}_expl_raw_log.txt")
+    ol_expl_log = os.path.join(prj_dir, "Openlane", globals.local_folder, f"{globals.design_name}_expl_raw_log.txt")
 
 
 def show_log(info: str):
@@ -285,28 +320,69 @@ def update_dimensions_param():
 
         if current_util is not None:
 
-            if current_util < 5:
-                MIN_UTIL = 0
+            if current_util < 10:
+                MIN_UTIL = 5
             else:
                 MIN_UTIL = current_util - 5
 
-            MAX_UTIL = current_util
+            MAX_UTIL = current_util + 10
         else:
-            MIN_UTIL = 35
-            MAX_UTIL = 45
+            # +- 10%
+            MIN_UTIL = 40
+            MAX_UTIL = 60
 
-        # dimensions = [
-        #     Real(current_period - 6, current_period, name='CLOCK_PERIOD'),
-        #     Integer(MIN_UTIL, MAX_UTIL, name='FP_CORE_UTIL'),
-        #     Real(0.40, 0.60, name='PL_TARGET_DENSITY'),
-        #     Categorical(["DELAY 0", "DELAY 2", "DELAY 4"], name='SYNTH_STRATEGY')]
-        
+        if globals.PPA_strategy == PPA_Strategy_Dt.get('P2'):
+
+            clock_options = Real(current_period - 4.5, current_period, name='CLOCK_PERIOD')
+
+            core_options = Integer(MIN_UTIL, MAX_UTIL, name='FP_CORE_UTIL')
+
+            pl_options = Real(0.3, 0.5, name='PL_TARGET_DENSITY')
+            
+            synth_options = Categorical(["DELAY 0", "DELAY 1", "DELAY 2", "DELAY 4"], name='SYNTH_STRATEGY')
+
+        elif globals.PPA_strategy == PPA_Strategy_Dt.get('A1'):
+
+            #Increase the clock
+            clock_options = Real(current_period + 4, current_period + 8, name='CLOCK_PERIOD')
+
+            core_options = Integer((MIN_UTIL + 5), (MAX_UTIL + 10), name='FP_CORE_UTIL')
+
+            pl_options = Real(0.7, 0.8, name='PL_TARGET_DENSITY')
+            
+            synth_options = Categorical(["AREA 0", "AREA 1", "AREA 2", "AREA 3"], name='SYNTH_STRATEGY')
+
+        elif globals.PPA_strategy == PPA_Strategy_Dt.get('P1'):
+
+            clock_options = Real(current_period + 6, current_period + 14, name='CLOCK_PERIOD')
+
+            core_options = Integer((MIN_UTIL + 5), (MAX_UTIL + 3), name='FP_CORE_UTIL')
+
+            pl_options = Real(0.5, 0.7, name='PL_TARGET_DENSITY')
+
+            synth_options = Categorical(["AREA 0", "AREA 1", "AREA 2", "AREA 3"], name='SYNTH_STRATEGY')
+
+        elif globals.PPA_strategy == PPA_Strategy_Dt.get('B'):
+
+            clock_options = Real(current_period - 1, current_period + 4.5, name='CLOCK_PERIOD')
+
+            globals.EXPLORATION_PARAMS_DT['min_clock'] = current_period - 1
+
+            globals.EXPLORATION_PARAMS_DT['max_clock'] = current_period + 4.5
+
+            core_options = Integer((MIN_UTIL + 5), (MAX_UTIL + 4), name='FP_CORE_UTIL')
+
+            pl_options = Real(0.65, 0.75, name='PL_TARGET_DENSITY')
+
+            synth_options = Categorical(["DELAY 0", "DELAY 1", "AREA 0", "AREA 1"], name='SYNTH_STRATEGY')
+
+
         # Balance PPA
         dimensions = [
-            Real(current_period - 2.5, current_period - 0.5, name='CLOCK_PERIOD'),
-            Integer(MIN_UTIL, MAX_UTIL, name='FP_CORE_UTIL'),
-            Real(0.40, 0.55, name='PL_TARGET_DENSITY'),
-            Categorical(["DELAY 2", "DELAY 4", "AREA 0", "AREA 3"], name='SYNTH_STRATEGY')
+            clock_options,
+            core_options,
+            pl_options,
+            synth_options
         ]
         
         # Done updating

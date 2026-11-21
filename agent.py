@@ -1,3 +1,4 @@
+from cProfile import label
 from operator import le
 import os
 from sqlite3.dbapi2 import Timestamp
@@ -18,7 +19,10 @@ from skopt import gp_minimize
 from skopt import dump, load
 import pandas as pd
 from skopt.callbacks import DeltaYStopper
-
+import streamlit as st
+from chat_status_manager import update_workflow_status
+import shutil
+import sys
 
 class FlowManager:
     def __init__(self):
@@ -79,13 +83,13 @@ class FlowManager:
             elif self.current_state == State.WRITE_CSV:
                 self.handle_write_csv()
 
-            elif self.current_state == State.DONE:
-                self.handle_done()
-
             elif self.current_state == State.ERROR:
                 self.handle_error()
-                break
             
+            elif self.current_state == State.DONE:
+                self.handle_done()
+                break
+
             time.sleep(1) # Small delay for readability
 
 
@@ -96,8 +100,14 @@ class FlowManager:
 
         self.transition_to(State.GENERATE_DESIGN)
 
-        globals.start_time = time.time()
+        # Delete all old artifacts
+        if os.path.exists(ac.design_folder_path):
 
+            shutil.rmtree(ac.design_folder_path)
+
+            print('Deleted old folder artifacts.')
+
+        globals.start_time = time.time()
 
 
     def handle_generate_design(self):
@@ -107,52 +117,46 @@ class FlowManager:
         show_log(design_log)
 
         result = False
-        
-        # if self.previous_state == State.INITIAL:
 
-        # Append system prompt with first attempt
-        # PPA_type always Performance
-        if ac.PPA_type == 'Performance':
-        
-            system_pt = get_performance_prompt(globals.prompt_version)
-        
-        elif ac.PPA_type == 'Area':
+        if globals.APP_IN_USE == True:
+            if ac.PPA_type == 'Performance':
+            
+                system_pt = get_performance_prompt(globals.prompt_version)
+            
+            elif ac.PPA_type == 'Area':
 
-            system_pt = get_area_prompt(globals.prompt_version)
+                system_pt = get_area_prompt(globals.prompt_version)
 
-        # Description will be the user prompt
-        self.msg.append({"role": ac.system_role, "content": system_pt})
+            # Description will be the user prompt
+            self.msg.append({"role": ac.system_role, "content": system_pt})
 
-        # user_pt = read_description(ac.benchmark_design_path)
+            # user_pt = read_description(ac.benchmark_design_path)
 
-        user_pt = globals.design_description
+            user_pt = globals.design_description
 
-        self.msg.append({"role": "user", "content": user_pt})
+            self.msg.append({"role": "user", "content": user_pt})
 
-        result = llm_generation("design", self.msg, 1, "phase_1")
+            result = llm_generation("design", self.msg, 1, "phase_1")
 
-        if result:
+            if result:
+
+                self.transition_to(State.VERIFY_SYNTAX)
+
+            else:
+                self.error_reason = 'Design generation failed.'
+
+                self.transition_to(State.ERROR)
+
+        elif globals.APP_IN_USE == False:
+
+            copy_benchmark_design()
 
             self.transition_to(State.VERIFY_SYNTAX)
 
-        else:
-            self.error_reason = 'Design generation failed.'
-
-            self.transition_to(State.ERROR)
+            result = True
 
         return result
 
-        # Only applied when running benchmark because of no code generation before
-        # globals.start_time = time.time()
-
-        # copied_path = copy_benchmark_design()
-
-        # self.transition_to(State.VERIFY_SYNTAX)
-
-        # Only applied when running benchmark
-
-        # return copied_path
-    
 
     def handle_verify_syntax(self):
         
@@ -172,9 +176,12 @@ class FlowManager:
 
             # Record successful syntax attempt
             globals.record_syntax_attempt = self.synt_count
-            
-            # self.transition_to(State.RUN_SIMULATION)
-            self.transition_to(State.RUN_OPENLANE)
+
+            if globals.APP_IN_USE == True:
+                self.transition_to(State.RUN_OPENLANE)
+
+            else:
+                self.transition_to(State.RUN_SIMULATION)
 
         else:
             self.error_reason = verify_err
@@ -266,10 +273,10 @@ class FlowManager:
             self.transition_to(State.ERROR)
 
 
-
     def handle_run_openlane(self):
 
         # globals.start_time = time.time()
+        globals.app_usage_dict['openlane_tries'] = self.ol_entry
         
         self.ol_entry += 1
 
@@ -277,13 +284,6 @@ class FlowManager:
 
         # Newly created the tag
         tag = agent_gen_timestamp(False)
-
-        # Debug
-        # globals.olis_init = False
-
-        # print("INIT value: ", globals.olis_init)
-
-        # log_info and log_dir in case failure
 
         result = openlane_flow_run(globals.olis_init, tag)
 
@@ -293,8 +293,8 @@ class FlowManager:
 
             globals.timestamp_tag = tag
 
-            self.transition_to(State.WRITE_CSV)
-            # self.transition_to(State.EXPLORATION_OPENLANE)
+            # self.transition_to(State.WRITE_CSV)
+            self.transition_to(State.EXPLORATION_OPENLANE)
 
         else:
 
@@ -312,21 +312,21 @@ class FlowManager:
 
         update_dimensions_param()
 
-        early_stopper = DeltaYStopper(delta=0.005, n_best=5)
+        early_stopper = DeltaYStopper(delta=0.00005, n_best=5)
 
         search_result = gp_minimize(
             func=evaluate_openlane_performance, # The execution function object
-            dimensions=ac.dimensions,              # Target parameter variables
-            n_calls=30,                         # Maximum total OpenLane executions allowed
-            n_initial_points=8,                 # Random exploratory seeds to sketch out the initial map
-            random_state=42,
+            dimensions=ac.dimensions, # Target parameter variables
+            n_calls=ac.MAX_OL_EXPLORATION, # Maximum total, 30 OpenLane executions allowed
+            n_initial_points=(ac.MAX_OL_EXPLORATION//2), # Random exploratory seeds to sketch out the initial map
+            # random_state=42,
             callback=[early_stopper]
         )
 
         if not hasattr(search_result, 'x_iters') or len(search_result.x_iters) == 0:
             print("[ERROR] Optimization stopped before completing a single run.")
             
-        elif search_result.fun >= 3.0:
+        elif search_result.fun >= 15:
             print("[WARNING] Optimization finished, but ALL OpenLane runs failed or crashed.")
 
         # Check C: SUCCESS! Safe to access data
@@ -336,7 +336,7 @@ class FlowManager:
 
             show_log(f"\n[SUCCESS] Optimization completed safely after {len(search_result.x_iters)} iterations!")
 
-            checkpoint_filename = os.path.join(ac.model, globals.design_name,"openlane_bo_result_ppa.pkl")
+            checkpoint_filename = os.path.join(globals.local_folder, globals.design_name,"openlane_bo_result_ppa.pkl")
             dump(search_result, checkpoint_filename, store_objective=True)
             # search_result = load(checkpoint_filename)
 
@@ -353,9 +353,9 @@ class FlowManager:
             show_log(f" -> Selected Synthesis Strategy: {search_result.x[3]}")
             show_log(f"Best Achievable Loss Score: {search_result.fun:.2f}")
 
-            df = pd.read_csv(os.path.join(ac.model, globals.design_name, "optimization_history_manifest_ppa.csv"))
+            df = pd.read_csv(os.path.join(globals.local_folder, globals.design_name, f"optimization_history_manifest_ppa_{globals.timestamp_tag}.csv"))
 
-            target_score = round(search_result.fun, 2)
+            target_score = round(search_result.fun, 4)
 
             # Extract the timestamp(s) matching the exact score
             globals.exploration_tag = df.loc[df['Loss_Score'] == target_score, 'Timestamp'].values[0]
@@ -409,6 +409,10 @@ class FlowManager:
 
     def handle_write_csv(self):
 
+        # globals.exploration_tag = 'RUN_EX_2026.11.18_02.36.13'
+
+        # globals.timestamp_tag = 'RUN_2026.11.18_02.28.24'
+
         result = False
 
         if globals.start_time is not None:
@@ -422,6 +426,12 @@ class FlowManager:
 
         # Extract after Openlane exploration
         if globals.exploration_tag:
+
+            csv_first = os.path.join(openlane_dir, "designs", globals.design_name, "runs", globals.timestamp_tag, "reports", "metrics.csv")
+
+            extract_ppa_to_excel(csv_first, globals.record_syntax_attempt, globals.record_simulation_attempt, globals.record_openlane_attempt, globals.duration_minutes)
+
+            time.sleep(2)
 
             path_csv = os.path.join(openlane_dir, "designs", globals.design_name, "runs", globals.exploration_tag, "reports", "metrics.csv")
 
@@ -457,9 +467,13 @@ class FlowManager:
         openlane_delete_temp_items(os.path.join(ac.ol_source_mount, globals.design_name))
 
         # Reset tag
-        # globals.timestamp_tag = ""
+        if globals.APP_IN_USE == False:
 
-        # globals.exploration_tag = ""
+            globals.timestamp_tag = ""
+
+            globals.exploration_tag = ""
+
+        globals.exploration_count = 0
 
         # Reset config.json
         globals.olis_init = True
@@ -479,19 +493,25 @@ class FlowManager:
 
 if __name__ == "__main__":
 
-    pass
+    designs_indices = [int(arg) for arg in sys.argv[1:-1]]
 
-    # for i in range (32, 34):
+    user_ppa = sys.argv[-1]
 
-    #     globals.design_name = design_list[i]
+    for design_i in designs_indices:
 
-    #     print("\nProcessing design number: ", i)
+        globals.design_name = design_list[design_i]
 
-    #     fetch_workflow_variables()
+        print("\nProcessing design number: ", design_i)
+
+        globals.PPA_strategy = ac.PPA_Strategy_Dt.get(user_ppa)
+
+        fetch_workflow_variables()
         
-    #     flow = FlowManager()
+        flow = FlowManager()
 
-    #     flow.run()
+        flow.run()
+
+        time.sleep(2)
 
 
 

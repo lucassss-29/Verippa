@@ -1,7 +1,10 @@
 import pandas as pd
-from agent_config import show_log, prj_dir, gs_title, gs_sheet
+from agent_config import show_log, prj_dir, benchmark, openlane_dir
 import gspread
 import globals
+import re
+from agent_config import BenchmarkType
+import os
 
 # Reads the OpenLane metrics CSV and exports specific PPA columns to gsheet.
 def extract_ppa_to_excel(path_csv, syn_attempt, sim_attempt, ol_attempt, mins):
@@ -26,17 +29,19 @@ def extract_ppa_to_excel(path_csv, syn_attempt, sim_attempt, ol_attempt, mins):
 
     # Auth and open the sheet
     gc = gspread.service_account(filename=f'{prj_dir}/Gsheet/credentials.json')
-    sh = gc.open(gs_title)
+    sh = gc.open(globals.gs_title)
 
     sheet_names = [sheet.title for sheet in sh.worksheets()]
 
-    if gs_sheet in sheet_names:
-        print(f"\n'{gs_sheet}' already exists. Opening it...")
-        worksheet = sh.worksheet(gs_sheet)
+    if globals.gs_sheet in sheet_names:
+        print(f"\n'{globals.gs_sheet}' already exists. Opening it...")
+        worksheet = sh.worksheet(globals.gs_sheet)
         
     else:
-        print(f"\n'{gs_sheet}' not found. Creating it...")
-        worksheet = sh.add_worksheet(title=gs_sheet, rows=100, cols=20)
+        print(f"\n'{globals.gs_sheet}' not found. Creating it...")
+        worksheet = sh.add_worksheet(title=globals.gs_sheet, rows=100, cols=20)
+
+    print('path_csv: ', path_csv)
 
     try:
         # Load the raw metrics
@@ -57,6 +62,7 @@ def extract_ppa_to_excel(path_csv, syn_attempt, sim_attempt, ol_attempt, mins):
 
         ppa_df['prompt_token'] = globals.running_total_tokens
 
+        write_improvement_data(ppa_df)
 
         # Prepare data for GSheet
         data_values = ppa_df.values.tolist()
@@ -74,9 +80,24 @@ def extract_ppa_to_excel(path_csv, syn_attempt, sim_attempt, ol_attempt, mins):
         else:
 
             # Sheet has data: write only the new data (append to the end)
-            worksheet.append_rows(data_values)
+            try:
 
-        show_log(f"\nSuccess! PPA report saved to Report/{gs_title}\n")
+                sh_response = worksheet.append_rows(data_values)
+
+                sh_row_added = sh_response.get('updates', {}).get('updatedRows', 0)
+
+                if sh_row_added > 0:
+
+                    show_log(f"\nSuccess! PPA report saved to {sh_row_added} rows at Report/{globals.gs_title}\n")
+
+                else:
+
+                    show_log('Google API 0 rows were updated.')
+
+            except Exception as e:
+
+                print(f'[CSV] Network or API Error occurred: {e}')
+            
 
     except KeyError as e:
 
@@ -87,23 +108,59 @@ def extract_ppa_to_excel(path_csv, syn_attempt, sim_attempt, ol_attempt, mins):
     except Exception as e:
 
         print(f"Exception: An unexpected error occurred: {e}")
-        
+
+
+def write_improvement_data(pf):
+
+    # Success OpenLane path
+    first_csv = os.path.join(openlane_dir, "designs", globals.design_name, "runs", globals.timestamp_tag, "reports", "metrics.csv")
+
+    try:
+
+        first_df = pd.read_csv(first_csv)
+
+        if first_df.loc[0, 'design_name'] == globals.design_name:
+
+            bm_frequency = first_df.loc[0, 'suggested_clock_frequency']
+
+            bm_power = first_df.loc[0, 'power_typical_internal_uW'] + first_df.loc[0, 'power_typical_leakage_uW'] + first_df.loc[0, 'power_typical_switching_uW']
+
+            bm_area = first_df.loc[0, 'DIEAREA_mm^2']
+
+            print(bm_frequency, bm_power, bm_area)
+
+        else:
+
+            print('[CSV] Design name not found in the OpenLane report')
+
+    except KeyError as e:
+
+        print(f"Exception: Could not find column {e} in the CSV file.")
+
+    pf['Impr_frequency'] = round(((pf['suggested_clock_frequency'] - bm_frequency)/bm_frequency * 100), 2)
+
+    pf['Impr_power'] = round(((pf['power_typical_internal_uW'] + pf['power_typical_leakage_uW'] + pf['power_typical_switching_uW'] - bm_power)/bm_power * 100), 2)
+
+    pf['Impr_area'] = round(((pf['DIEAREA_mm^2'] - bm_area) / bm_area * 100), 2)
+
+
+
 
 def extract_failure_data(fail_reason, syn_attempt, sim_attempt, ol_attempt, mins, prompt_version):
 
     # Auth and open the sheet
     gc = gspread.service_account(filename=f'{prj_dir}/Gsheet/credentials.json')
-    sh = gc.open(gs_title)
+    sh = gc.open(globals.gs_title)
 
     sheet_names = [sheet.title for sheet in sh.worksheets()]
 
-    if gs_sheet in sheet_names:
-        print(f"'{gs_sheet}' already exists. Opening it...")
-        worksheet = sh.worksheet(gs_sheet)
+    if globals.gs_sheet in sheet_names:
+        print(f"'{globals.gs_sheet}' already exists. Opening it...")
+        worksheet = sh.worksheet(globals.gs_sheet)
         
     else:
-        print(f"'{gs_sheet}' not found. Creating it...")
-        worksheet = sh.add_worksheet(title=gs_sheet, rows=100, cols=20)
+        print(f"'{globals.gs_sheet}' not found. Creating it...")
+        worksheet = sh.add_worksheet(title=globals.gs_sheet, rows=100, cols=20)
 
     failure_dict = {
         'design_name': globals.design_name,
@@ -130,4 +187,4 @@ def extract_failure_data(fail_reason, syn_attempt, sim_attempt, ol_attempt, mins
 
     worksheet.append_row(list(failure_dict.values()))
 
-    show_log(f"\nFailure data for {globals.design_name} saved to Report/{gs_title}\n")
+    show_log(f"\nFailure data for {globals.design_name} saved to Report/{globals.gs_title}\n")

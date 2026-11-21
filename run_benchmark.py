@@ -1,5 +1,5 @@
 import os
-from agent_config import prj_dir, model
+from agent_config import prj_dir
 import shutil
 import re
 import globals
@@ -12,12 +12,12 @@ def copy_benchmark_design():
 
         bm_file = os.path.join(prj_dir, ac.benchmark_folder, globals.design_name, f"verified_{globals.design_name}.sv")
 
-        target_file = os.path.join(prj_dir, model, globals.design_name, f"{globals.design_name}.sv")
+        target_file = os.path.join(prj_dir, globals.local_folder, globals.design_name, f"{globals.design_name}.sv")
 
     else:
         bm_file = os.path.join(prj_dir, ac.benchmark_folder, globals.design_name, f"verified_{globals.design_name}.v")
 
-        target_file = os.path.join(prj_dir, model, globals.design_name, f"{globals.design_name}.v")
+        target_file = os.path.join(prj_dir, globals.local_folder, globals.design_name, f"{globals.design_name}.v")
 
     if not os.path.exists(os.path.dirname(target_file)):
         os.makedirs(os.path.dirname(target_file), exist_ok=True)

@@ -60,7 +60,17 @@ def plot_gsheet_to_csv(sheet_title, sheet_name):
     print(f"\nSave gsheet {sheet_name} to csv done.")
 
 
-def plot_spider_one(org_sh, com_sh, candidate):
+def plot_spider_one(sh_file, org_sh, com_sh, candidate):
+
+    # plt.style.use('grayscale')
+
+    plt.rcParams['hatch.linewidth'] = 2.0
+
+
+    # Define PPA Indicators , 
+    indicators = ['suggested_clock_frequency', 'total_power', 'DIEAREA_mm^2']
+
+    sh_title = sh_file
 
     angles = np.linspace(0, 2 * np.pi, len(indicators), endpoint=False).tolist()
     angles += angles[:1]
@@ -109,9 +119,16 @@ def plot_spider_one(org_sh, com_sh, candidate):
 
         values += values[:1]
     
-        ax.plot(angles, values, linewidth=2, label=row['version'], color=c)
+        ax.plot(angles, values, linewidth=3.5, label=row['version'], color=c)
 
         ax.fill(angles, values, alpha=0.25, color=c)
+
+
+        if c == cs_colors[1]:
+
+            ax.plot(angles, values, linewidth=2, label=row['version'], color=c)
+
+            ax.fill(angles, values, hatch='//', facecolor=c, edgecolor='gray')
 
     ax.set_theta_offset(np.pi / 2)
 
@@ -140,111 +157,114 @@ def plot_spider_one(org_sh, com_sh, candidate):
 
     plt.savefig(f'/Users/dsmac/Documents/thesis/impl/latex/Thesis-Template-main/figure/chap4/radar_exploration/{org_sh}_{com_sh}_{candidate}.pdf')
 
-    print("Save diagram done.")
+    # print("Save diagram done.")
 
 # Plot full design list between two sheets
-def plot_spider_diagram(compare_sh1, compare_sh2, list_draws, ch_title):
+# def plot_spider_diagram(compare_sh1, compare_sh2, list_draws, ch_title):
 
-    # Generate spider angles
-    angles = np.linspace(0, 2 * np.pi, len(indicators), endpoint=False).tolist()
-    angles += angles[:1]
+#     # Define PPA Indicators , 
+#     indicators = ['suggested_clock_frequency', 'total_power', 'DIEAREA_mm^2']
 
-    fig, axes = plt.subplots(rows, cols, figsize=(20, rows * 5), subplot_kw=dict(polar=True))
+#     # Generate spider angles
+#     angles = np.linspace(0, 2 * np.pi, len(indicators), endpoint=False).tolist()
+#     angles += angles[:1]
 
-    axes_flat = axes.flatten()
+#     fig, axes = plt.subplots(rows, cols, figsize=(20, rows * 5), subplot_kw=dict(polar=True))
 
-    # print(len(axes_flat))
+#     axes_flat = axes.flatten()
 
-    # # Create combined df by extract from each sheet
-    csv_path1 = os.path.join(database_path, f"{compare_sh1}.csv")
+#     # print(len(axes_flat))
 
-    if not os.path.exists(csv_path1):
+#     # # Create combined df by extract from each sheet
+#     csv_path1 = os.path.join(database_path, f"{compare_sh1}.csv")
 
-        plot_gsheet_to_csv(sh_title, compare_sh1)
+#     if not os.path.exists(csv_path1):
 
-    csv_path2 = os.path.join(database_path, f"{compare_sh2}.csv")
+#         plot_gsheet_to_csv(sh_title, compare_sh1)
 
-    if not os.path.exists(csv_path2):
+#     csv_path2 = os.path.join(database_path, f"{compare_sh2}.csv")
 
-        plot_gsheet_to_csv(sh_title, compare_sh2)
+#     if not os.path.exists(csv_path2):
 
-    # Create combined df
-    df1 = pd.read_csv(csv_path1)
-    df2 = pd.read_csv(csv_path2)
+#         plot_gsheet_to_csv(sh_title, compare_sh2)
 
-    # Start plotting, i equal to design name
-    for i in range(total_charts):
+#     # Create combined df
+#     df1 = pd.read_csv(csv_path1)
+#     df2 = pd.read_csv(csv_path2)
 
-        row_data1 = df1[df1['design_name'] == list_draws[i]]
-        row_data2 = df2[df2['design_name'] == list_draws[i]]
+#     # Start plotting, i equal to design name
+#     for i in range(total_charts):
 
-        if row_data1['flow_status'].item() == "flow completed" and row_data2['flow_status'].item() == "flow completed":
+#         row_data1 = df1[df1['design_name'] == list_draws[i]]
+#         row_data2 = df2[df2['design_name'] == list_draws[i]]
 
-            combined_df = pd.concat([row_data1, row_data2], ignore_index=True)
+#         if row_data1['flow_status'].item() == "flow completed" and row_data2['flow_status'].item() == "flow completed":
+
+#             combined_df = pd.concat([row_data1, row_data2], ignore_index=True)
     
-            combined_df = combined_df.apply(safe_to_numeric) 
+#             combined_df = combined_df.apply(safe_to_numeric) 
 
-            normed_df = normalize_drawing_data(combined_df, indicators)
+#             normed_df = normalize_drawing_data(combined_df, indicators)
 
-            # normed_df.to_csv(f'./Report/Diagram/Database/{ch_title}.csv')
+#             # normed_df.to_csv(f'./Report/Diagram/Database/{ch_title}.csv')
 
-            ax = axes_flat[i]
+#             ax = axes_flat[i]
 
-            colors = [cs_colors[1], cs_colors[2]]
+#             colors = [cs_colors[1], cs_colors[2]]
 
-            for (index, row), c in zip(normed_df.iterrows(), colors):
+#             for (index, row), c in zip(normed_df.iterrows(), colors):
 
-                values = row[indicators].tolist()
+#                 values = row[indicators].tolist()
 
-                values += values[:1]
+#                 values += values[:1]
 
-                # Plot each row
-                if row['critical_path_ns'] == -1:
+#                 # Plot each row
+#                 if row['critical_path_ns'] == -1:
 
-                    ax.plot(angles, values, linewidth=2, label=row['version'], color='red')
+#                     ax.plot(angles, values, linewidth=2, label=row['version'], color='red')
 
-                else:
-                    ax.plot(angles, values, linewidth=2, label=row['version'], color=c)
+#                 else:
+#                     ax.plot(angles, values, linewidth=2, label=row['version'], color=c)
 
-                    ax.fill(angles, values, alpha=0.25, color=c)
+#                     ax.fill(angles, values, alpha=0.25, color=c)
 
-            # Rotate labels to be upright
-            ax.set_theta_offset(np.pi / 2)
+#             # Rotate labels to be upright
+#             ax.set_theta_offset(np.pi / 2)
 
-            ax.set_theta_direction(-1)
+#             ax.set_theta_direction(-1)
 
-            ax.set_title(f"{list_draws[i]}", y=-0.1)
+#             ax.set_title(f"{list_draws[i]}", y=-0.1)
 
-            ax.set_xticks(angles[:-1])
+#             ax.set_xticks(angles[:-1])
 
-            ax.set_xticklabels(indicator_cvt, fontsize=10)
+#             ax.set_xticklabels(indicator_cvt, fontsize=10)
 
-            # Adjust label padding so they don't touch the outer circle
-            ax.tick_params(axis='x', pad=15)
+#             # Adjust label padding so they don't touch the outer circle
+#             ax.tick_params(axis='x', pad=15)
     
-    # This removes the 3 blank circles in the last row
-    for j in range(i + 1, len(axes_flat)):
-        axes_flat[j].axis('off')
+#     # This removes the 3 blank circles in the last row
+#     for j in range(i + 1, len(axes_flat)):
+#         axes_flat[j].axis('off')
 
-    # # Set common legend
-    # axes_flat[1] some version failed at first design, change between 0 and 1
-    handles, labels = axes_flat[1].get_legend_handles_labels()
+#     # # Set common legend
+#     # axes_flat[1] some version failed at first design, change between 0 and 1
+#     handles, labels = axes_flat[1].get_legend_handles_labels()
 
-    fig.legend(handles, labels, loc='lower center', ncol=len(labels), 
-        bbox_to_anchor=(0.5, 0.02), frameon=False)
+#     fig.legend(handles, labels, loc='lower center', ncol=len(labels), 
+#         bbox_to_anchor=(0.5, 0.02), frameon=False)
 
-    fig.suptitle('Compare enhance performance metrics', fontsize=16)
+#     fig.suptitle('Compare enhance performance metrics', fontsize=16)
 
-    # add extra margin at the top
-    plt.subplots_adjust(top=0.85)
+#     # add extra margin at the top
+#     plt.subplots_adjust(top=0.85)
 
-    plt.tight_layout(rect=[0, 0.1, 1, 1], h_pad=3.0)
+#     plt.tight_layout(rect=[0, 0.1, 1, 1], h_pad=3.0)
 
-    plt.savefig(f'./Report/Diagram/Image/VerilogEval/{ch_title}.png')
+#     plt.savefig(f'./Report/Diagram/Image/VerilogEval/{ch_title}.png')
 
-    # plt.show()
+#     # plt.show()
 
-    print(f"Save diagram {ch_title} done.") 
+#     print(f"Save diagram {ch_title} done.") 
 
 def plot_spider_layout(compare_sh1, compare_sh2, list_draws, ch_title):
 
@@ -415,8 +435,8 @@ def rtllm_eval_general():
     widthg = 0.25
     width = 0.4              # width of each bar
 
-    axes[0].bar(x - widthg, total, widthg, label='Total', color=panel_blue[0])
-    axes[0].bar(x, passed, widthg, label='Passed', color=panel_blue[1])
+    axes[0].bar(x - widthg, total, widthg, label='Total', color=panel_blue[3], hatch='\\\\\\')
+    axes[0].bar(x, passed, widthg, label='Passed', color=panel_blue[2], hatch='..')
     axes[0].bar(x + widthg, failed, widthg, label='Failed', color=cs_colors[1])
 
     axes[0].set_ylabel('Số thiết kế')
@@ -438,7 +458,7 @@ def rtllm_eval_general():
 
     custom_x = np.array([0.0, 0.6]) 
 
-    axes[1].bar(tools, syntax_sim, color=panel_blue[2], width=width)
+    axes[1].bar(tools, syntax_sim, color=panel_blue[2], width=width, hatch='\\\\\\\\')
     axes[1].set_ylim(0, 110)   # leave room for labels
     axes[1].set_xlabel('Benchmark')
     axes[1].set_ylabel('Tỉ lệ thành công (%)')
@@ -1021,13 +1041,15 @@ def plot_chart5():
     '#F58518',  # Orange
     ]
 
+    marker_ls = ['s', '^', 'o']
+
     # Plot pass@1 (solid)
     for i,model in enumerate(pass1):
         ax.plot(
             x,
             pass1[model],
-            marker='o',
             color=reset_color[i],
+            marker=marker_ls[i],
             linewidth=1.5,
             label=f"{model} pass@1"
         )
@@ -1038,7 +1060,7 @@ def plot_chart5():
         ax.plot(
             x,
             pass5[model],
-            marker='o',
+            marker=marker_ls[i],
             linewidth=1.5,
             linestyle='--',
             color=reset_color[i],
@@ -1115,9 +1137,9 @@ def plot_chart5():
     # Legend 1: Models (Colors)
     # ==========================
     model_handles = [
-        Line2D([0], [0], marker='s', color='w', markerfacecolor=reset_color[0],markersize=10),
-        Line2D([0], [0], marker='s', color='w', markerfacecolor=reset_color[1],markersize=10),
-        Line2D([0], [0], marker='s', color='w', markerfacecolor=reset_color[2],markersize=10)
+        Line2D([0], [0], marker=marker_ls[0], color=reset_color[0]),
+        Line2D([0], [0], marker=marker_ls[1], color=reset_color[1]),
+        Line2D([0], [0], marker=marker_ls[2], color=reset_color[2])
     ]
 
     legend1 = ax.legend(
@@ -1127,7 +1149,7 @@ def plot_chart5():
         loc="upper left",
         bbox_to_anchor=(-0.05, -0.15),
         ncol = 3,
-        columnspacing=0.3, handletextpad=0.2,
+        columnspacing=0.7, handletextpad=0.2,
         frameon=False,
     )
 
@@ -1577,7 +1599,7 @@ def plot_dumbbell_expl():
         # Dots
         ax.scatter(ppa, y_pos, color=cs_colors[0], s=30, label='Cân bằng PPA', zorder=3)
 
-        ax.scatter(perf, y_pos, color=cs_colors[1], s=30, label='Ưu tiên hiệu năng', zorder=3)
+        ax.scatter(perf, y_pos, color=cs_colors[1], s=30, label='Ưu tiên hiệu năng', zorder=3, marker='^')
         
 
         # (Value labels omitted to save space – uncomment if needed)
@@ -1750,6 +1772,7 @@ def plot_area_gradient_colorbar():
         'grad': ['#4C78A800', '#4C78A8FF'] 
     } 
 }
+    marker_ls = ['o', 's', '^']
 
     # 2. Initialize the figure with the required size (6, 4)
     fig, ax = plt.subplots(figsize=(6, 4))
@@ -1765,9 +1788,9 @@ def plot_area_gradient_colorbar():
     x_dense = np.linspace(0, len(metrics) - 1, 200)
 
     # 3. Plot each dataset sequentially with its unique gradient mask
-    for label, values in datasets.items():
+    for (label, values), marker in zip(datasets.items(), marker_ls):
         # Draw boundary line
-        ax.plot(x, values, color=colors[label]['line'], linewidth=1.5, label=label, zorder=3, marker='o')
+        ax.plot(x, values, color=colors[label]['line'], linewidth=1.5, label=label, zorder=3, marker=marker)
         
         # Smooth interpolating curve for clipping path
         y_upper = np.interp(x_dense, x, values)
@@ -1857,15 +1880,15 @@ def plot_area_gradient_colorbar():
 
     # Position legend cleanly out of the way of the high values
     ax.legend(
-        handles=legend_elements,
+        # handles=legend_elements,
         loc='upper center', 
         bbox_to_anchor=(0.5, -0.15), 
         ncol=3, 
         frameon=False, 
         facecolor='white', 
         edgecolor='#e0e0e0',
-        handlelength=1.0,
-        handleheight=1.0
+        # handlelength=1.0,
+        # handleheight=1.0
     )
 
     plt.tight_layout()
@@ -1886,24 +1909,26 @@ def plot_sum_number_CP_for_Perf():
 
     fig, ax = plt.subplots(figsize=(6, 4))
     x = np.arange(len(versions))
-    width = 0.17
+    width = 0.25
     spacing = 0.3
 
     colors = [cs_colors[1], panel_blue[3], panel_blue[1]] # Modern palette
+    hatch_ls = ['', r'\\\\', '...']
     labels = ['Cải thiện', 'Không thay đổi', 'Thất bại']
     data_matrix = [improve, no_change, failure]
     offsets = [-spacing, 0, spacing]
 
     # 2. Render using native rounded stroke caps
-    for dataset, offset, color, label in zip(data_matrix, offsets, colors, labels):
+    for dataset, offset, color, label, pattern in zip(data_matrix, offsets, colors, labels, hatch_ls):
         bars = ax.bar(
             x + offset, dataset, width, 
             label=label, 
             color=color, 
-            edgecolor=color, 
-            linewidth=6,          
-            joinstyle='round', 
-            capstyle='round'
+            hatch=pattern,
+            # edgecolor=color, 
+            linewidth=1.5,          
+            # joinstyle='round', 
+            # capstyle='round'
         )
         
         # NEW: Loop through each bar to overlay the text values on top
@@ -1912,7 +1937,7 @@ def plot_sum_number_CP_for_Perf():
             ax.annotate(
                 f'{round(height)}%',                  # Text formatting (e.g., 25.2%)
                 xy=(bar.get_x() + bar.get_width() / 2, height),
-                xytext=(0, 5),                    # 5 points vertical offset above the cap
+                xytext=(0, 3),                    # 5 points vertical offset above the cap
                 textcoords="offset points",
                 ha='center', va='bottom',         # Centered horizontally
                 fontsize=8, fontweight='semibold', color='#4a5568'
@@ -1937,12 +1962,20 @@ def plot_sum_number_CP_for_Perf():
     # ax.spines['left'].set_color('#cbd5e1')
 
     legend_elements = [
-        mlines.Line2D([], [], color=colors[0], marker='o', linestyle='None', markersize=10, label=labels[0]),
-        mlines.Line2D([], [], color=colors[1], marker='o', linestyle='None', markersize=10, label=labels[1]),
-        mlines.Line2D([], [], color=colors[2], marker='o', linestyle='None', markersize=10, label=labels[2])
+        mlines.Line2D([], [], color=colors[0], marker='s', linestyle='None', markersize=10, label=labels[0]),
+        mlines.Line2D([], [], color=colors[1], marker='s', linestyle='None', markersize=10, label=labels[1]),
+        mlines.Line2D([], [], color=colors[2], marker='s', linestyle='None', markersize=10, label=labels[2])
     ]
 
-    ax.legend(handles=legend_elements, loc='upper center', bbox_to_anchor=(0.5, -0.15),  ncol=3, columnspacing=0.5, handletextpad=0, frameon=False)
+    ax.legend(
+        handlelength=1.5,
+        handleheight=1.5,
+        loc='upper center', 
+        bbox_to_anchor=(0.5, -0.15), 
+        ncol=3, 
+        columnspacing=0.5, 
+        handletextpad=0.5, 
+        frameon=False)
 
     plt.tight_layout()
     plt.savefig('/Users/dsmac/Documents/thesis/impl/latex/Thesis-Template-main/figure/chap4/sum_all_model_for_perf.pdf')
@@ -1990,6 +2023,7 @@ def plot_scatter_CP_models():
     # Style configs
     colors = {"ChatGPT": cs_colors[1], "DeepSeek": panel_blue[0], "Gemini": panel_blue[2]}
     version_mapping = {"Perf-v0": 0.0, "Perf-v1": 1.0, "Perf-v2": 2.0}
+    markers = {"ChatGPT": 'o', "DeepSeek": 's', "Gemini": '^'}
 
     # Set random seed so the point spread is perfectly reproducible
     np.random.seed(42)
@@ -2016,8 +2050,9 @@ def plot_scatter_CP_models():
             x_positions,
             group["Value"],
             color=colors[model],
+            marker=markers[model],
             label=label,
-            s=20,
+            s=30,
             alpha=1,
             zorder=3
         )
@@ -2164,13 +2199,8 @@ def plot_openlane_conver():
 if __name__ == "__main__":
 
     database_path = os.path.join(prj_dir, "Report", "Diagram", "Database")
-
-    # Define PPA Indicators , 
-    indicators = ['suggested_clock_frequency', 'total_power', 'DIEAREA_mm^2']
-
-    indicator_cvt = ['Freq(MHz)', 'Power(nW)','Die(um^2)']
-
-    sh_title = 'openlane_ex'
+    
+    indicator_cvt = ['Freq(MHz)', 'Power(W)','Die(um^2)']
 
     # Calculate grid dimensions
     total_charts = len(design_list)
@@ -2189,6 +2219,12 @@ if __name__ == "__main__":
 
     compare_1 = sh_names[0]
 
-    # plot_spider_one('RTLLM_benchmark', 'RTLLM_v3', 'traffic_light')
+    plot_spider_one('performance_metrics_enhance', 'performance_RTLLM_bm_filter', 'performance_RTLLM_enhanced', 'multi_pipe_4bit')
+    plot_spider_one('area_metrics_enhance', 'area_RTLLM_bm_filter', 'area_RTLLM_enhanced', 'multi_pipe_4bit')
+    plot_spider_one('power_metrics_enhance', 'power_RTLLM_bm_filter', 'power_RTLLM_enhanced', 'multi_pipe_4bit')
 
-    plot_chart5()
+    # multi_pipe_4bit, traffic_light
+
+    # plot_area_gradient_colorbar()
+
+    # rtllm_eval_general()

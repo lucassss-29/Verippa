@@ -3,7 +3,7 @@ timestamp_tag = ""
 
 exploration_tag = ""
 
-# Handle init of OpenLane flow whether true or false
+# Init json config file
 olis_init = True
 
 # Handle flow system
@@ -36,7 +36,7 @@ AI_provider = ""
 
 prompt_version = -1
 
-PPA_strategy = "" #Balanced or High performance
+PPA_strategy = "" 
 
 design_description = "" 
 
@@ -47,5 +47,16 @@ app_usage_dict = {
     'ol_log_path': '',
     'out_conversation_path': '',
     'stream_object': None,
-    'openlane_trace_path': ''
+    'openlane_trace_path': '',
+    'openlane_tries': 0
 }
+
+APP_IN_USE = False
+
+local_folder = ''
+
+gs_title = ''
+
+gs_sheet = ''
+
+EXPLORATION_PARAMS_DT = {'min_clock': None, 'max_clock': None}

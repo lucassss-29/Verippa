@@ -1,3 +1,4 @@
+import glob
 import re
 from tkinter import W, Y
 import streamlit as st
@@ -9,8 +10,8 @@ import globals
 import os
 import pandas as pd
 import altair as alt
-import inspect
-import collections.abc
+from chat_status_manager import update_workflow_status
+
 
 with open('style.css') as f:
     st.html(f"<style>{f.read()}</style>")
@@ -26,16 +27,6 @@ def config_frontUI():
         col_left, col_right = st.columns([0.4, 0.6])
 
         with col_left:
-            st.markdown(
-                """
-                <style>
-                .block-container {
-                    padding-top: 3rem;
-                }
-                </style>
-                """,
-                unsafe_allow_html=True
-            )
 
             col1, col2 = st.columns([3, 2])
 
@@ -44,8 +35,6 @@ def config_frontUI():
 
             with col2:
                 st.pills(label="",options=["SDK Sky130"], default="SDK Sky130")
-
-            # st.html("<div style='margin-bottom: 10px;'></div>")
 
             model_option = st.selectbox(
                 "Model",
@@ -64,79 +53,86 @@ def config_frontUI():
                 default=list(prompts_map.keys())[0]
             )
 
-            ppa_option= st.pills(label="PPA strategy", options=[ "Balanced", "High frequency"],default="Balanced")
+            ppa_option= st.pills(label="PPA strategy", options=['Power Optimization', 'Performance Optimization', 'Area Optimization', "Balanced Mode"], default="Power Optimization")
 
-            md_name_option = st.text_input('Module name', placeholder="e.g.counter_8bit", width=200)
+            md_name_option = st.text_input('Module name', placeholder="e.g., counter_8bit", width=200)
 
             description_option = st.text_area("Module RTL details", placeholder="e.g., Describe the module functionality in detail, and declaration of inputs and outputs ...", height=130)
 
-            main_button_spot = st.button("⚡️Generate High Quality Verilog", type="primary", use_container_width=True)
+            main_button_spot = st.button("⚡️ Generate High Quality Verilog", type="primary", use_container_width=True)
             
         with col_right:
 
-            st.markdown(
-                """
-                <style>
-                .block-container {
-                    padding-top: 3rem;
-                }
-                </style>
-                """,
-                unsafe_allow_html=True
-            )
-            progress_label_spot = st.empty()
+            st.markdown('<div class="colored-right-col"></div>', unsafe_allow_html=True)
 
-            if st.session_state.pipeline_started:
-                progress_bar_spot = st.progress(st.session_state.overall_progress)
-            else:
-                progress_bar_spot = None
+            with st.container(height=590, border=False):
 
-            # Show permanent UI when condition met
-            if st.session_state.code_verified:
+                progress_label_spot = st.empty()
 
-                code_spot = st.container()
-                show_verified_code(code_spot)
+                if st.session_state.pipeline_started:
+                    progress_bar_spot = st.progress(st.session_state.overall_progress)
+                else:
+                    progress_bar_spot = None
 
-            else:
-                code_spot = None
+                # Show permanent UI when condition met
+                if st.session_state.code_verified:
 
-            if st.session_state.physical_summary:
-                result_spot = st.container()
+                    code_spot = st.container()
+                    show_verified_code(code_spot)
 
-                update_result_summaryUI(result_spot)
-            
-            else:
-                result_spot = None
+                else:
+                    code_spot = None
 
-            graph_spot = st.container()
+                # if st.session_state.physical_summary:
+                if st.session_state.done_exploration:
+                    result_spot = st.container()
 
-            # Maintaining UI layout
-            if st.session_state.pipeline_started:
+                    update_result_summaryUI(result_spot)
+                
+                else:
+                    result_spot = None
 
-                log_status_spot = st.status(label='')
+                if st.session_state.done_exploration:
 
-                if st.session_state.long_log:
+                    graph_spot = st.container()
+
+                    update_improvement_graph(graph_spot)
+
+                else:
+
+                    graph_spot = None
+
+                # Maintaining UI layout
+                if st.session_state.pipeline_started:
+
+                    if (st.session_state.current_state == ac.State.DONE) or (st.session_state.current_state == ac.State.STREAMLIT_NON_EXIT):
+                        
+                        log_status_spot = st.status(label='', state='complete')
+                    
+                    elif st.session_state.current_state == ac.State.ERROR:
+
+                        log_status_spot = st.status(label='', state='error')
+
+                    else:
+
+                        log_status_spot = st.status(label='', state='running')
+
 
                     with log_status_spot:
 
                         verbose_spot = st.container(height=250, autoscroll=True)
 
                 else:
-
-                    with log_status_spot:
-                        verbose_spot = st.empty()
-
-            else:
-                log_status_spot = None
-                verbose_spot = None
+                    log_status_spot = None
+                    verbose_spot = None
 
 
-            if (st.session_state.current_state == ac.State.DONE) or (st.session_state.current_state == ac.State.ERROR):
+                if st.session_state.current_state == ac.State.STREAMLIT_NON_EXIT:
 
-                trace_button_spot = st.button('Show Trace Log', type='primary', on_click=open_drawer_callback, icon=':material/open_in_new:')
+                    trace_button_spot = st.button('Show Trace Log', type='primary', on_click=open_drawer_callback, icon=':material/open_in_new:')
 
-            else:
-                trace_button_spot = None
+                else:
+                    trace_button_spot = None
 
 
     with tab2:
@@ -165,24 +161,34 @@ def config_frontUI():
 
     return ui, user_selection
 
+def extract_csv_data(csv_path):
+
+    df = pd.read_csv(csv_path)
+
+    data_df = df.copy()
+
+    power = round((data_df['power_typical_internal_uW'].iloc[0] + data_df['power_typical_leakage_uW'].iloc[0] + data_df['power_typical_switching_uW'].iloc[0]), 6)
+
+    freq = int(data_df['suggested_clock_frequency'].iloc[0])
+
+    area = round((data_df['DIEAREA_mm^2'].iloc[0]), 6)
+
+    return power, freq, area
+
+
 def update_result_summaryUI(ui):
 
     openlane_dir = os.path.join(os.path.dirname(os.getcwd()), "OpenLane")
 
+    default_csv = os.path.join(openlane_dir, "designs", globals.design_name, "runs", globals.timestamp_tag, "reports", "metrics.csv")
+
+    default_power, default_f, default_area = extract_csv_data(default_csv)
+
     # Read locally
     path_csv = os.path.join(openlane_dir, "designs", globals.design_name, "runs", globals.exploration_tag, "reports", "metrics.csv")
 
-    df = pd.read_csv(path_csv)
+    opt_power, opt_f, opt_area = extract_csv_data(path_csv)
 
-    ppa_df = df.copy()
-
-    freq = int(ppa_df['suggested_clock_frequency'].iloc[0])
-
-    area = round((ppa_df['DIEAREA_mm^2'].iloc[0]), 6)
-
-    power = round((ppa_df['power_typical_internal_uW'].iloc[0]), 6)
-
-    print('f, a, p: ', freq, area, power)
     
     with ui:
 
@@ -192,13 +198,26 @@ def update_result_summaryUI(ui):
             st.write('RTL Check  \n:green[**Passed**]')
 
         with c2:
-            st.write(f'Frequency  \n**{freq} MHz**')
+            st.write(f'Frequency  \n**{opt_f} MHz**')
 
         with c3:
-            st.write(f'Area (mm²)  \n**{area}**')
+            st.write(f'Area (mm²)  \n**{opt_area}**')
 
         with c4:
-            st.write(f'Power (µW)  \n**{power}**')
+            st.write(f'Power (W)  \n**{opt_power}**')
+
+        compare_data = {
+            '': ['OpenLane default', 'Our system'],
+            'Power (W)': [default_power, opt_power],
+            'Frequency (MHz)': [default_f, opt_f],
+            'Die area (mm2)': [default_area, opt_area]
+        }
+
+        df_cpData = pd.DataFrame(compare_data)
+
+        st.write('##### Extract report')
+
+        st.table(df_cpData)
 
         st.divider()
 
@@ -210,6 +229,8 @@ def update_improvement_graph(ui):
     org_csv = os.path.join(openlane_dir, "designs", globals.design_name, "runs", globals.timestamp_tag, "reports", "metrics.csv")
 
     new_csv = os.path.join(openlane_dir, "designs", globals.design_name, "runs", globals.exploration_tag, "reports", "metrics.csv")
+
+    print('globals.exploration_tag: ', globals.exploration_tag)
 
     org_df = pd.read_csv(org_csv)
 
@@ -233,9 +254,9 @@ def update_improvement_graph(ui):
         ]
     })
 
-    with ui['graph']:
+    with ui:
 
-        st.write('##### Optimization impact compared with standard')
+        st.write('##### Summary')
 
         base = alt.Chart(chart_df).encode(
             x=alt.X("Metric:N", axis=alt.Axis(labelAngle=0), sort=None, title=None),
@@ -257,12 +278,11 @@ def update_improvement_graph(ui):
             text='Display_Text:N'
         )
 
-        final_chart = (bars + text).properties(height=200)
+        final_chart = (bars + text).properties(height=200, width=350)
 
-        st.altair_chart(final_chart, use_container_width=True)
+        st.altair_chart(final_chart, width='stretch')
 
-    update_workflow_status(ui, label='Workflow completed', state='complete')
-
+    # update_workflow_status(ui, label='Workflow completed', state='complete')
 
 def setup_progress_label(ui):
 
@@ -278,49 +298,11 @@ def setup_progress_label(ui):
         with c4:
             st.markdown("<p style='text-align: right;'>Optimization</p>", unsafe_allow_html=True)
         
-
 def update_progress_bar(ui, value):
 
     st.session_state.overall_progress = value
 
     ui['progress_bar'].progress(value)
-    
-
-def update_workflow_status(ui, label, message='', state='running', expanded=True):
-
-    # status_box = ui.get('log_status')
-
-    # if status_box is not None:
-    with ui['log_status'] as status_box:
-        is_an_iterator = isinstance(message, collections.abc.Iterator)
-        # is_an_iterator = True
-
-        # print('is_an_iterator: ', is_an_iterator)
-
-        if is_an_iterator:
-
-            # verbose_box = st.container(height=250, autoscroll=True)
-
-            with ui['verbose']:
-
-                # stream_instance = yield_stream_generator(message)
-                stream_instance = message
-
-                status_box.update(label=label, expanded=True)
-
-                st.write_stream(stream_instance)
-
-        # if message:
-
-        #     status_box.write(message)
-
-        status_box.update(label=label, state=state, expanded=expanded)
-
-        # if not is_an_iterator:
-
-        #     time.sleep(1.5)
-
-
 
 def long_text_generator():
     passage = (
@@ -330,7 +312,6 @@ def long_text_generator():
     for word in passage.split():
         yield word + " "
         time.sleep(0.08)
-
 
 def yield_stream_generator(stream_object, provider):
 
@@ -442,7 +423,6 @@ def save_user_session_state(input):
 
     print('globals.prompt_version: ', globals.prompt_version)
     
-
 def init_app_session_state():
 
     app_state = {
@@ -451,16 +431,18 @@ def init_app_session_state():
         'overall_progress': 0,
         'code_verified': False,
         'physical_summary': False,
+        'done_exploration': False,
         'done_status': False,
         'show_trace_button': False,
         'active_drawer': False,
         'long_log': False,
+        'is_workflow_error': False,
+        'ui_elements': None
     }
 
     for key, value in app_state.items():
         if key not in st.session_state:
             st.session_state[key] = value
-
 
 def show_verified_code(ui):
 
@@ -476,7 +458,6 @@ def show_verified_code(ui):
             st.markdown(":material/check_circle: Verified RTL")
             st.code(code, language="verilog", line_numbers=True, wrap_lines=True, height=300)
             st.divider()
-
 
 @st.dialog('System Trace Log', position='right')
 def show_trace_drawer():
@@ -513,12 +494,16 @@ def show_trace_drawer():
 def open_drawer_callback():
     st.session_state.active_drawer = True
 
-
 def main():
+
+    print('RUNNING')
 
     init_app_session_state()
 
     ui, user_input = config_frontUI()
+
+    #For other file
+    st.session_state.ui_elements = ui
 
     save_user_session_state(user_input)
 
@@ -536,7 +521,7 @@ def main():
         st.session_state.pipeline_started = True
         st.rerun()
 
-    # st.session_state.current_state = ac.State.DONE
+    # st.session_state.current_state = ac.State.EXPLORATION_OPENLANE
 
     # When button is clicked, persistent state
     if st.session_state.prime_button:
@@ -572,14 +557,6 @@ def main():
                 
                 update_progress_bar(ui, 10)
 
-                st.session_state.long_log = True
-
-                stream_instance = yield_stream_generator(globals.app_usage_dict['stream_object'], globals.AI_provider)
-
-                print('stream_instance: ', stream_instance)
-
-                update_workflow_status(ui, label='Reasoning...', message=stream_instance)
-
                 update_workflow_status(ui, label='Generation is done.')
                 
                 st.session_state.current_state = ac.State.VERIFY_SYNTAX
@@ -590,21 +567,25 @@ def main():
             st.rerun()
 
         elif st.session_state.current_state == ac.State.VERIFY_SYNTAX:
-                
+
+            update_progress_bar(ui, 30)
+
             syntax_check = agent_ist.handle_verify_syntax()
+
+            time.sleep(2)
 
             if syntax_check:
 
                 # compile_check = agent_ist.handle_run_simulation() # Skip simulation
                 compile_check = True
 
-                st.session_state.long_log = False
-
                 update_workflow_status(ui, label='Code verified')
 
                 if compile_check:
 
-                    update_progress_bar(ui, 25)
+                    update_progress_bar(ui, 35)
+
+                    time.sleep(2)
 
                     st.session_state.code_verified = True
 
@@ -631,35 +612,23 @@ def main():
 
                 st.session_state.current_state = ac.State.ERROR
 
+            st.rerun()
+
 
         elif st.session_state.current_state == ac.State.RUN_OPENLANE:
                 
-            update_workflow_status(ui, label='Running OpenLane...')
+            update_progress_bar(ui, 60)
 
             ol_check = agent_ist.handle_run_openlane()
 
-            st.session_state.long_log = True
-
-            ol_stream_instance = stream_file_lines(globals.app_usage_dict['openlane_trace_path'])
-
-            update_workflow_status(ui, label='Running OpenLane...', message=ol_stream_instance)
-            
             if ol_check:
-
-                update_workflow_status(ui, label='Running OpenLane complete...', message=f'Completion Tag ID: {globals.timestamp_tag}')
 
                 update_progress_bar(ui, 60)
 
-                # ex_check = agent_ist.handle_run_exploration_openlane()
-                ex_check = True
+                update_workflow_status(ui, label='Running OpenLane complete...', message=f'Completion Tag ID: {globals.timestamp_tag}')
 
-                if ex_check:
+                st.session_state.current_state = ac.State.EXPLORATION_OPENLANE
 
-                    update_progress_bar(ui, 75)
-
-                    update_workflow_status(ui, label='Optimizing parameters complete')
-
-                    st.session_state.current_state = ac.State.WRITE_CSV
             else:
 
                 st.session_state.current_state = ac.State.CORRECT_OPENLANE
@@ -688,45 +657,62 @@ def main():
 
             st.rerun()
 
+        elif st.session_state.current_state == ac.State.EXPLORATION_OPENLANE:
+
+            update_progress_bar(ui, 90)
+
+            update_workflow_status(ui, label='Optimizing parameters and this process can take several minutes...')
+
+            ex_check = agent_ist.handle_run_exploration_openlane()
+
+            if ex_check:
+
+                update_progress_bar(ui, 95)
+
+                update_workflow_status(ui, label='Optimizing parameters completed.')
+
+                st.session_state.done_exploration = True
+
+                st.session_state.current_state = ac.State.WRITE_CSV
+
+            st.rerun()
+
+
         elif st.session_state.current_state == ac.State.ERROR:
 
-            update_workflow_status(ui, label='Workflow finished with errors!', message=globals.app_usage_dict['error_info'], state='error', expanded=True)
+            agent_ist.handle_error()
 
-            st.session_state.show_trace_button = True
+            st.session_state.is_workflow_error = True
+
+            st.session_state.current_state = ac.State.WRITE_CSV
+
+            st.rerun()
+
 
         elif st.session_state.current_state == ac.State.WRITE_CSV:
 
             # Manual, remove it when setting exploration phase
             # globals.timestamp_tag = 'RUN_2026.10.28_15.44.04'
-            globals.exploration_tag = globals.timestamp_tag
+            # globals.exploration_tag = globals.timestamp_tag
 
-            update_workflow_status(ui, label='Storing metrics')
+            update_workflow_status(ui, label='Storing .csv artifacts...')
 
             csv_check = agent_ist.handle_write_csv()
             # csv_check = True
 
-            if csv_check:
+            if csv_check and st.session_state.done_exploration:
 
                 update_workflow_status(ui, label='Physical data is ready')
 
                 st.session_state.physical_summary = True
                 
 
-                # update_improvement_graph(ui)
-
-                st.session_state.current_state = ac.State.DONE
-
-            else:
-
-                st.session_state.current_state = ac.State.ERROR
+            st.session_state.current_state = ac.State.DONE
 
             st.rerun()
 
 
         elif st.session_state.current_state == ac.State.DONE:
-
-            # No more operation
-            update_workflow_status(ui, label='Workflow is processed completely!', state='complete')
 
             agent_ist.handle_done()
 
@@ -735,6 +721,23 @@ def main():
             st.session_state.show_trace_button = True
 
             update_progress_bar(ui, 100)
+
+            st.session_state.current_state = ac.State.STREAMLIT_NON_EXIT
+
+            st.rerun()
+
+        elif st.session_state.current_state == ac.State.STREAMLIT_NON_EXIT:
+
+            # Show notification otherwise nothing is display in status
+            if st.session_state.is_workflow_error == True:
+
+                update_workflow_status(ui, label='Workflow finished with errors!', message=globals.app_usage_dict['error_info'], state='error', expanded=True, persist=True)
+
+            else:   
+
+                update_workflow_status(ui, label='Workflow is processed completely!', state='complete')
+
+            # No st.rerun() anymore
 
         
     if st.session_state.active_drawer and st.session_state.pipeline_started:

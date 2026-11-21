@@ -11,6 +11,8 @@ from auto_code_generation import openlane_generation
 import shutil
 import glob
 from agent_config import fetch_workflow_variables
+import streamlit as st
+from chat_status_manager import update_workflow_status
 
 ADJUST_CLOCK_PED = 10
 
@@ -29,11 +31,11 @@ def openlane_flow_run(is_init: bool, run_tag):
     with open(globals.app_usage_dict['log_path'], 'a') as file:
         file.write(f"LOG {run_tag}\n")
 
-    # Initialize output_log content
-    output_log = ""
+    # Initialize output_log content, mutable object
+    output_log = []
 
     # Specific folder in OpenLane directory
-    ol_designname_folder = os.path.join(ac.openlane_dir, ac.model, globals.design_name)
+    ol_designname_folder = os.path.join(ac.openlane_dir, globals.local_folder, globals.design_name)
 
     if not os.path.exists(ol_designname_folder):
         #  Create folder with name followed by LLM model
@@ -77,15 +79,31 @@ def openlane_flow_run(is_init: bool, run_tag):
             text=True
         )
 
-        process.stdin.write(inner_command)
+        if globals.APP_IN_USE == True:
 
-        process.stdin.flush()
+            log_instance = openlane_streaming_generator_log(process, inner_command, output_log)
 
-        for line in iter(process.stdout.readline, ''):
-            # Print each line to your terminal as it's generated
-            print(line, end='') 
+            agent_ui = st.session_state.ui_elements
 
-            output_log += line
+            if st.session_state.current_state == ac.State.RUN_OPENLANE:
+
+                update_workflow_status(agent_ui, label=f'Running OpenLane... ({globals.app_usage_dict["openlane_tries"]}/10)', message=log_instance)
+
+            elif st.session_state.current_state == ac.State.EXPLORATION_OPENLANE:
+
+                update_workflow_status(agent_ui, label=f'Running exploration... (Round {globals.exploration_count}/{ac.MAX_OL_EXPLORATION})', message=log_instance)
+
+        elif globals.APP_IN_USE == False:
+
+            process.stdin.write(inner_command)
+
+            process.stdin.flush()
+
+            for line in iter(process.stdout.readline, ''):
+                # Print each line to your terminal as it's generated
+                print(line, end='') 
+
+                output_log += line
 
         # Close the stdout to signal that we're done reading
         process.stdout.close()  
@@ -93,15 +111,19 @@ def openlane_flow_run(is_init: bool, run_tag):
         # Wait for the process to finish
         return_code = process.wait()
 
+        print('return_code: ', return_code)
+
         if not os.path.exists(os.path.dirname(ac.ol_raw_log)):
 
             os.mkdir(os.path.dirname(ac.ol_raw_log))
+
+        full_output_log = "".join(output_log)
 
         with open(ac.ol_raw_log, 'w') as log_file:
 
             ac.show_log(f"[OL] Writing OpenLane flow output_log to {ac.ol_raw_log}\n")
 
-            log_file.write(output_log)
+            log_file.write(full_output_log)
 
         globals.app_usage_dict['openlane_trace_path'] = ac.ol_raw_log
 
@@ -142,6 +164,23 @@ def openlane_flow_run(is_init: bool, run_tag):
         print(f"Exception failed to run OpenLane flow: {e}\n")
 
         return False
+    
+
+def openlane_streaming_generator_log(process_obj, sub_command, log_ls):
+
+    process_obj.stdin.write(sub_command)
+
+    process_obj.stdin.flush()
+
+    for line in iter(process_obj.stdout.readline, ''):
+        # Print each line to your terminal as it's generated
+        print(line, end='') 
+
+        log_ls.append(line)
+
+        yield line
+
+
     
 def openlane_run_exploration():
 
@@ -476,8 +515,6 @@ def openlane_correct(msg, attempt):
 
             issue = OpenLaneIssue.REGEN_DESIGN
 
-            pass
-
         case 31:
             # STEP 31
             issue = OpenLaneIssue.CLOCK_PED
@@ -539,14 +576,14 @@ def openlane_correct(msg, attempt):
 
 def openlane_delete_temp_items(path):
 
-    search_pattern = os.path.join(path, "runs", "RUN_EX_*")
+    search_pattern = os.path.join(path, "runs", "RUN_*")
 
     # Remove folders
     for folder_path in glob.glob(search_pattern):
         if os.path.isdir(folder_path):
             current_folder_name = os.path.basename(folder_path)
 
-            if current_folder_name == globals.exploration_tag:
+            if (current_folder_name == globals.exploration_tag) or (current_folder_name == globals.timestamp_tag):
                 print(f"Skipping (Preserving): {folder_path}")
                 continue
 
